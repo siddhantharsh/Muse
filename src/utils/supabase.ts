@@ -17,6 +17,7 @@ export function getSupabase(): SupabaseClient | null {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        storageKey: 'muse-auth',          // fixed key across file:// and http origins
         storage: typeof localStorage !== 'undefined' ? localStorage : undefined,
       },
     });

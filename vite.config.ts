@@ -9,7 +9,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  base: './',
+  // './' for Electron file:// loading, '/' for web hosting
+  base: process.env.ELECTRON_BUILD === '1' ? './' : '/',
   server: {
     port: 5173,
   },

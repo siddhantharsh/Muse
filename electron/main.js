@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
 
 const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
@@ -24,6 +24,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      // Persist localStorage/IndexedDB between sessions
+      partition: 'persist:muse',
     },
   });
 
