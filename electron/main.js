@@ -1,6 +1,5 @@
-const { app, BrowserWindow, globalShortcut, Notification, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const { startSyncServer, stopSyncServer, getSyncInfo, readSyncData, writeSyncData, readPin, resetPin } = require('./syncServer');
 
 const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 
@@ -38,12 +37,6 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-
-  // Start the LAN sync server so phone can connect
-  const distPath = isDev
-    ? path.join(__dirname, '../public')  // In dev, serve public assets
-    : path.join(__dirname, '../dist');     // In prod, serve built dist
-  startSyncServer(distPath);
 }
 
 // IPC handlers for window controls
@@ -57,20 +50,9 @@ ipcMain.on('window-maximize', () => {
 });
 ipcMain.on('window-close', () => mainWindow?.close());
 
-// IPC handlers for sync
-ipcMain.handle('sync-get-info', () => getSyncInfo());
-ipcMain.handle('sync-read-data', () => readSyncData());
-ipcMain.handle('sync-write-data', (_event, data) => {
-  const ok = writeSyncData(data);
-  return { ok };
-});
-ipcMain.handle('sync-get-pin', () => readPin());
-ipcMain.handle('sync-reset-pin', () => resetPin());
-
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  stopSyncServer();
   app.quit();
 });
 

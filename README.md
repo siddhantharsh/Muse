@@ -68,11 +68,10 @@ When a meeting runs over, a task gets skipped, or a deadline changes — hit **R
 │  │    │  Engine   │ │ Gen   │ │  Graph   │             │   │
 │  │    └───────────┘ └───────┘ └──────────┘             │   │
 │  └──────────────────────────────────────────────────────┘   │
-│  ┌───────────────┐  ┌──────────────┐  ┌────────────────┐   │
-│  │  LAN Sync     │  │  Cloud Sync  │  │  Persistence   │   │
-│  │  Server       │  │  (Supabase)  │  │  (localStorage │   │
-│  │  (HTTP+PIN)   │  │              │  │   + IndexedDB) │   │
-│  └───────────────┘  └──────────────┘  └────────────────┘   │
+│  ┌──────────────────────────┐  ┌────────────────────────┐   │
+│  │  Cloud Sync (Supabase)   │  │  Persistence           │   │
+│  │  Auth + PostgreSQL       │  │  localStorage+IndexedDB│   │
+│  └──────────────────────────┘  └────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -87,7 +86,6 @@ When a meeting runs over, a task gets skipped, or a deadline changes — hit **R
 | Styling | TailwindCSS 3.4 + Nord Theme |
 | Persistence | localStorage + IndexedDB (dual-write) |
 | Cloud Sync | Supabase (Auth + PostgreSQL) |
-| LAN Sync | Custom HTTP server with PIN authentication |
 | Icons | Lucide React |
 | Date Handling | date-fns 3.6 |
 
@@ -243,7 +241,6 @@ The engine stops scheduling beyond a configurable horizon (default: 8 weeks). Da
 
 ### Sync & Storage
 - [x] Dual persistence: localStorage (fast) + IndexedDB (durable)
-- [x] LAN sync server with PIN authentication
 - [x] Supabase cloud sync (sign up / sign in / auto-push / auto-pull)
 - [x] Data export and import
 
@@ -262,8 +259,7 @@ The engine stops scheduling beyond a configurable horizon (default: 8 weeks). Da
 Muse/
 ├── electron/
 │   ├── main.js              # Electron main process
-│   ├── preload.js           # Context bridge (IPC)
-│   └── syncServer.js        # LAN sync HTTP server
+│   └── preload.js           # Context bridge (IPC)
 ├── src/
 │   ├── engine/
 │   │   ├── scheduler.ts     # Constraint-satisfaction scheduling algorithm
@@ -282,20 +278,17 @@ Muse/
 │   │   ├── TitleBar.tsx      # Custom frameless title bar
 │   │   ├── PhoneHeader.tsx   # Mobile header with hamburger
 │   │   ├── AuthScreen.tsx    # Cloud auth (sign in/up)
-│   │   ├── PinGate.tsx       # LAN sync PIN authentication
 │   │   ├── RecalculateButton.tsx    # Schedule rebuild trigger
 │   │   └── DiscardChangesModal.tsx  # Unsaved changes guard
 │   ├── store/
 │   │   └── useMuseStore.ts   # Zustand store (state + actions)
 │   ├── hooks/
 │   │   ├── useCloudSync.ts   # Supabase auto-push/pull
-│   │   ├── useSyncEngine.ts  # LAN sync polling
 │   │   └── useNotificationScheduler.ts  # Browser notifications
 │   ├── utils/
 │   │   ├── cloudSync.ts      # Supabase auth + CRUD helpers
 │   │   ├── supabase.ts       # Supabase client initialization
 │   │   ├── storage.ts        # localStorage + IndexedDB persistence
-│   │   ├── syncClient.ts     # LAN sync HTTP client
 │   │   └── dateUtils.ts      # Date formatting utilities
 │   ├── types/
 │   │   └── index.ts          # Complete TypeScript type system
@@ -389,19 +382,6 @@ In Supabase Dashboard → Authentication → Providers, ensure **Email** is enab
 ### 4. Sign In
 
 Open Muse → Settings → Cloud Account → Sign In with your email and password.
-
----
-
-## LAN Sync (Desktop → Phone)
-
-The desktop app runs a built-in HTTP server for local network access:
-
-1. Open Muse desktop → Settings → Sync
-2. Note the **LAN URL** and **PIN** displayed
-3. On your phone, open the URL in a browser
-4. Enter the PIN to authenticate
-
-> **Note:** LAN sync requires both devices on the same network. For cross-network sync, use Cloud Sync instead.
 
 ---
 

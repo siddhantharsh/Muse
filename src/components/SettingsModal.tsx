@@ -22,11 +22,7 @@ import {
   Upload,
   Download,
   CalendarPlus,
-  Smartphone,
-  Copy,
-  Check,
   Shield,
-  RefreshCw,
   ArrowLeft,
 } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
@@ -37,11 +33,14 @@ import {
   DaySchedule,
   TimeBlock,
 } from '../types';
-import { isElectron, desktopGetSyncInfo, desktopGetPin, desktopResetPin } from '../utils/syncClient';
 import { isCloudConfigured, getCloudUser, cloudSignOut, cloudSignIn, cloudSignUp } from '../utils/cloudSync';
 
+function isElectron(): boolean {
+  return !!(window as any).electronAPI;
+}
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const SECTION_IDS = ['general', 'scheduling', 'scheduling-hours', 'device-sync', 'cloud-account', 'calendar-sync', 'appearance', 'notifications'] as const;
+const SECTION_IDS = ['general', 'scheduling', 'scheduling-hours', 'cloud-account', 'calendar-sync', 'appearance', 'notifications'] as const;
 type SectionId = typeof SECTION_IDS[number];
 
 export function SettingsModal() {
@@ -60,7 +59,6 @@ export function SettingsModal() {
     { id: 'general' as SectionId, label: 'General', icon: <SettingsIcon size={16} /> },
     { id: 'scheduling' as SectionId, label: 'Scheduling Engine', icon: <Zap size={16} /> },
     { id: 'scheduling-hours' as SectionId, label: 'Scheduling Hours', icon: <Clock size={16} /> },
-    { id: 'device-sync' as SectionId, label: 'Device Sync', icon: <Smartphone size={16} /> },
     ...(isCloudConfigured()
       ? [{ id: 'cloud-account' as SectionId, label: 'Cloud Account', icon: <Shield size={16} /> }]
       : []),
@@ -144,9 +142,6 @@ export function SettingsModal() {
           )}
           {activeSection === 'calendar-sync' && (
             <CalendarSyncSettings importICS={importICS} exportICS={exportICS} />
-          )}
-          {activeSection === 'device-sync' && (
-            <DeviceSyncSettings />
           )}
           {activeSection === 'cloud-account' && (
             <CloudAccountSettings />
@@ -986,167 +981,6 @@ function DateOverridesEditor({ profile, updateProfile }: { profile: SchedulingHo
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ---- Device Sync Settings ----
-function DeviceSyncSettings() {
-  const [syncInfo, setSyncInfo] = useState<{ urls: string[]; running: boolean } | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [pin, setPin] = useState<string | null>(null);
-  const [pinCopied, setPinCopied] = useState(false);
-  const desktop = isElectron();
-
-  useEffect(() => {
-    if (desktop) {
-      desktopGetSyncInfo().then((info) => {
-        if (info) setSyncInfo(info);
-      });
-      desktopGetPin().then((p) => {
-        if (p) setPin(p);
-      });
-    }
-  }, [desktop]);
-
-  const handleCopy = (url: string) => {
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  const handleCopyPin = () => {
-    if (!pin) return;
-    navigator.clipboard.writeText(pin).then(() => {
-      setPinCopied(true);
-      setTimeout(() => setPinCopied(false), 2000);
-    });
-  };
-
-  const handleResetPin = async () => {
-    const newPin = await desktopResetPin();
-    if (newPin) setPin(newPin);
-  };
-
-  if (!desktop) {
-    return (
-      <div className="space-y-6">
-        <SectionHeader
-          title="Device Sync"
-          subtitle="You're viewing Muse from a synced device"
-        />
-        <div className="bg-nord1 border border-nord3 p-4 space-y-2">
-          <div className="text-sm text-nord14 font-medium">Connected to desktop</div>
-          <div className="text-xs text-nord4">
-            Changes you make here will automatically sync back to the desktop app.
-            The sync happens every 3 seconds.
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <SectionHeader
-        title="Device Sync"
-        subtitle="Access Muse from your phone or tablet on the same WiFi network"
-      />
-
-      <div className="bg-nord1 border border-nord3 p-4 space-y-4">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${syncInfo?.running ? 'bg-nord14' : 'bg-nord11'}`} />
-          <span className="text-sm text-nord6">
-            Sync server: {syncInfo?.running ? 'running' : 'starting...'}
-          </span>
-        </div>
-
-        {syncInfo?.urls && syncInfo.urls.length > 0 ? (
-          <div className="space-y-3">
-            <div className="text-xs text-nord4">
-              Open this URL on your phone browser (both devices must be on the same WiFi):
-            </div>
-            {syncInfo.urls.map((url) => (
-              <div key={url} className="flex items-center gap-2">
-                <code className="flex-1 text-sm text-nord13 bg-nord0 px-3 py-2 font-mono border border-nord3">
-                  {url}
-                </code>
-                <button
-                  onClick={() => handleCopy(url)}
-                  className="btn-secondary text-xs flex items-center gap-1 px-2 py-2"
-                  title="Copy URL"
-                >
-                  {copied ? <Check size={12} className="text-nord14" /> : <Copy size={12} />}
-                </button>
-              </div>
-            ))}
-            <div className="text-xs text-nord3 space-y-1 mt-2">
-              <p>• Your phone will show the same Muse app in the browser</p>
-              <p>• You can &quot;Add to Home Screen&quot; for an app-like experience</p>
-              <p>• Changes sync automatically in both directions</p>
-              <p>• Works on any WiFi where devices can see each other</p>
-            </div>
-
-            {/* PIN Security Section */}
-            <div className="border-t border-nord3 pt-3 mt-3">
-              <div className="flex items-center gap-2 mb-2">
-                <Shield size={14} className="text-nord13" />
-                <span className="text-xs text-nord6 font-medium">Security PIN</span>
-              </div>
-              <div className="text-xs text-nord4 mb-3">
-                Your phone must enter this PIN to access Muse. Share it only with your devices.
-              </div>
-              {pin && (
-                <div className="flex items-center gap-2 mb-2">
-                  <code className="text-lg text-nord13 bg-nord0 px-4 py-2 font-mono border border-nord3 tracking-[0.3em] font-bold">
-                    {pin}
-                  </code>
-                  <button
-                    onClick={handleCopyPin}
-                    className="btn-secondary text-xs flex items-center gap-1 px-2 py-2"
-                    title="Copy PIN"
-                  >
-                    {pinCopied ? <Check size={12} className="text-nord14" /> : <Copy size={12} />}
-                  </button>
-                  <button
-                    onClick={handleResetPin}
-                    className="btn-secondary text-xs flex items-center gap-1 px-2 py-2"
-                    title="Generate new PIN"
-                  >
-                    <RefreshCw size={12} />
-                  </button>
-                </div>
-              )}
-              <div className="text-[10px] text-nord3">
-                Resetting the PIN will disconnect any currently connected devices.
-              </div>
-            </div>
-
-            <div className="border-t border-nord3 pt-3 mt-3">
-              <div className="text-xs text-nord4 mb-2">
-                Or install the Android app for a native experience:
-              </div>
-              <a
-                href={`${syncInfo.urls[0]}/download-app`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary text-xs inline-flex items-center gap-1.5"
-              >
-                <Download size={12} />
-                Download Muse.apk
-              </a>
-              <div className="text-[10px] text-nord3 mt-1.5">
-                On your phone: open the URL above → tap &quot;Download Muse.apk&quot; → install
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-xs text-nord4">
-            Unable to detect network address. Make sure you're connected to WiFi.
-          </div>
-        )}
-      </div>
     </div>
   );
 }

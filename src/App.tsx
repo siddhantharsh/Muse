@@ -14,15 +14,16 @@ import { FloatingEventModal } from './components/FloatingEventModal';
 import { CommandPalette } from './components/CommandPalette';
 import { TitleBar } from './components/TitleBar';
 import { PhoneHeader } from './components/PhoneHeader';
-import { PinGate } from './components/PinGate';
 import { AuthScreen } from './components/AuthScreen';
 import { RecalculateButton } from './components/RecalculateButton';
 import { DiscardChangesModal } from './components/DiscardChangesModal';
 import { useNotificationScheduler } from './hooks/useNotificationScheduler';
-import { useSyncEngine } from './hooks/useSyncEngine';
 import { useCloudSync } from './hooks/useCloudSync';
-import { isElectron } from './utils/syncClient';
 import { isCloudConfigured, getCloudSession } from './utils/cloudSync';
+
+function isElectron(): boolean {
+  return !!(window as any).electronAPI;
+}
 
 export default function App() {
   const ui = useMuseStore((s) => s.ui);
@@ -34,7 +35,6 @@ export default function App() {
   const recalculate = useMuseStore((s) => s.recalculate);
 
   const isDesktop = isElectron();
-  const [phoneAuthenticated, setPhoneAuthenticated] = React.useState(isDesktop);
 
   // Cloud auth state — on desktop, skip the auth gate by default
   const [cloudAuthChecked, setCloudAuthChecked] = useState(!isCloudConfigured() || isDesktop);
@@ -145,16 +145,8 @@ export default function App() {
   // Desktop notification scheduler
   useNotificationScheduler();
 
-  // LAN sync engine (desktop pushes to file, phone polls server)
-  useSyncEngine();
-
   // Cloud sync (Supabase — pushes/pulls state when authenticated)
   useCloudSync();
-
-  // If phone and not authenticated (LAN PIN), show PIN gate
-  if (!phoneAuthenticated) {
-    return <PinGate onAuthenticated={() => setPhoneAuthenticated(true)} />;
-  }
 
   // If cloud is configured but not yet checked, show loading
   if (!cloudAuthChecked) {
