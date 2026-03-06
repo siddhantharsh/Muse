@@ -4,14 +4,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Nord theme-aware colors (swap between dark/light via CSS vars)
-        nord0: 'var(--nord0)',
-        nord1: 'var(--nord1)',
-        nord2: 'var(--nord2)',
-        nord3: 'var(--nord3)',
-        nord4: 'var(--nord4)',
-        nord5: 'var(--nord5)',
-        nord6: 'var(--nord6)',
+        // Nord theme-aware colors (RGB channel vars for opacity support)
+        nord0: 'rgb(var(--nord0) / <alpha-value>)',
+        nord1: 'rgb(var(--nord1) / <alpha-value>)',
+        nord2: 'rgb(var(--nord2) / <alpha-value>)',
+        nord3: 'rgb(var(--nord3) / <alpha-value>)',
+        nord4: 'rgb(var(--nord4) / <alpha-value>)',
+        nord5: 'rgb(var(--nord5) / <alpha-value>)',
+        nord6: 'rgb(var(--nord6) / <alpha-value>)',
         // Nord Frost (static — same in both themes)
         nord7: '#8FBCBB',
         nord8: '#88C0D0',

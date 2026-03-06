@@ -1,6 +1,6 @@
 // ============================================================
 // Muse — Cloud Sync Hook
-// Pushes local state to Supabase on changes, pulls on connect
+// Bi-directional sync: pushes on local changes, polls remote
 // ============================================================
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -8,58 +8,91 @@ import { useMuseStore } from '../store/useMuseStore';
 import {
   cloudPush,
   cloudPull,
+  cloudGetVersion,
   getCloudUser,
   isCloudConfigured,
 } from '../utils/cloudSync';
 
-const CLOUD_PUSH_DEBOUNCE = 3000; // 3s debounce for cloud pushes
+const PUSH_DEBOUNCE = 3000;   // 3s debounce for pushing local changes
+const POLL_INTERVAL = 15000;  // 15s polling for remote changes
 
 export function useCloudSync() {
   const tasks = useMuseStore((s) => s.tasks);
   const events = useMuseStore((s) => s.events);
   const lists = useMuseStore((s) => s.lists);
   const settings = useMuseStore((s) => s.settings);
+
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPushRef = useRef<string>('');
+  const lastPushHash = useRef<string>('');
+  const lastRemoteVersion = useRef<string | null>(null);
+  const isPulling = useRef(false);    // guard against pull→push loops
   const initialPullDone = useRef(false);
 
-  // Pull remote state on first mount (if authenticated)
-  useEffect(() => {
-    if (!isCloudConfigured() || initialPullDone.current) return;
+  // ── Pull remote state and apply it ──
+  const pullRemote = useCallback(async (force = false) => {
+    if (!isCloudConfigured()) return;
+    try {
+      const user = await getCloudUser();
+      if (!user) return;
 
-    (async () => {
-      try {
-        const user = await getCloudUser();
-        if (!user) return;
+      // Check version first (lightweight)
+      const remoteVersion = await cloudGetVersion();
+      if (!remoteVersion) return; // no remote data yet
 
-        const remote = await cloudPull();
-        if (remote && remote.tasks.length > 0) {
-          const localTasks = useMuseStore.getState().tasks;
-          // Only overwrite if local is empty or remote is newer
-          if (localTasks.length === 0) {
-            useMuseStore.setState({
-              tasks: remote.tasks,
-              events: remote.events,
-              lists: remote.lists,
-              settings: { ...useMuseStore.getState().settings, ...remote.settings },
-            });
-            useMuseStore.getState().persist();
-            console.log('[Muse Cloud] Pulled remote state');
-          }
-        }
-        initialPullDone.current = true;
-      } catch (e) {
-        console.error('[Muse Cloud] Pull failed:', e);
-      }
-    })();
+      // Skip if version hasn't changed (unless forced)
+      if (!force && remoteVersion === lastRemoteVersion.current) return;
+
+      const remote = await cloudPull();
+      if (!remote) return;
+
+      isPulling.current = true;
+      lastRemoteVersion.current = remoteVersion;
+
+      // Apply remote state
+      const currentSettings = useMuseStore.getState().settings;
+      useMuseStore.setState({
+        tasks: remote.tasks,
+        events: remote.events,
+        lists: remote.lists.length > 0 ? remote.lists : useMuseStore.getState().lists,
+        settings: { ...currentSettings, ...remote.settings },
+      });
+      useMuseStore.getState().persist();
+
+      // Update push hash so we don't immediately re-push what we just pulled
+      const hash = buildHash(remote.tasks, remote.events, remote.lists);
+      lastPushHash.current = hash;
+
+      console.log('[Muse Cloud] Pulled remote state', remoteVersion);
+
+      // Release guard after a tick so the setState-triggered push is skipped
+      setTimeout(() => { isPulling.current = false; }, 500);
+    } catch (e) {
+      isPulling.current = false;
+      console.error('[Muse Cloud] Pull failed:', e);
+    }
   }, []);
 
-  // Push local state on changes (debounced)
-  const debouncedPush = useCallback(() => {
+  // ── Initial pull on mount ──
+  useEffect(() => {
+    if (!isCloudConfigured() || initialPullDone.current) return;
+    initialPullDone.current = true;
+    pullRemote(true);
+  }, [pullRemote]);
+
+  // ── Periodic polling for remote changes ──
+  useEffect(() => {
     if (!isCloudConfigured()) return;
+    const interval = setInterval(() => pullRemote(), POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, [pullRemote]);
+
+  // ── Push local state on changes (debounced) ──
+  const debouncedPush = useCallback(() => {
+    if (!isCloudConfigured() || isPulling.current) return;
     if (pushTimer.current) clearTimeout(pushTimer.current);
 
     pushTimer.current = setTimeout(async () => {
+      if (isPulling.current) return; // double-check guard
       try {
         const user = await getCloudUser();
         if (!user) return;
@@ -72,22 +105,21 @@ export function useCloudSync() {
           settings: state.settings,
         };
 
-        // Skip if payload hasn't changed
-        const hash = JSON.stringify({
-          t: payload.tasks.length,
-          e: payload.events.length,
-          l: payload.lists.length,
-          u: payload.tasks.map((t) => t.updatedAt).sort().slice(-3).join(','),
-        });
-        if (hash === lastPushRef.current) return;
-        lastPushRef.current = hash;
+        // Skip if nothing changed
+        const hash = buildHash(payload.tasks, payload.events, payload.lists);
+        if (hash === lastPushHash.current) return;
+        lastPushHash.current = hash;
 
         await cloudPush(payload);
+        // After pushing, update our known remote version
+        const newVersion = await cloudGetVersion();
+        if (newVersion) lastRemoteVersion.current = newVersion;
+
         console.log('[Muse Cloud] Pushed state');
       } catch (e) {
         console.error('[Muse Cloud] Push failed:', e);
       }
-    }, CLOUD_PUSH_DEBOUNCE);
+    }, PUSH_DEBOUNCE);
   }, []);
 
   useEffect(() => {
@@ -101,3 +133,16 @@ export function useCloudSync() {
     };
   }, []);
 }
+
+/** Build a hash string to detect meaningful state changes */
+function buildHash(tasks: any[], events: any[], lists: any[]): string {
+  return JSON.stringify({
+    tc: tasks.length,
+    ec: events.length,
+    lc: lists.length,
+    // Include recent updatedAt timestamps to catch edits
+    tu: tasks.map((t: any) => `${t.id}:${t.updatedAt || ''}`).sort().join(','),
+    eu: events.map((e: any) => `${e.id}:${e.updatedAt || ''}`).sort().join(','),
+  });
+}
+

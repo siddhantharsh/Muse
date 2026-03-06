@@ -9,14 +9,14 @@
 /* ---- Theme CSS Variables ---- */
 
 :root {
-  /* Nord Polar Night ↔ Snow Storm mapping */
-  --nord0: #2E3440;
-  --nord1: #3B4252;
-  --nord2: #434C5E;
-  --nord3: #4C566A;
-  --nord4: #D8DEE9;
-  --nord5: #E5E9F0;
-  --nord6: #ECEFF4;
+  /* Nord Polar Night ↔ Snow Storm mapping (RGB channels for Tailwind opacity) */
+  --nord0: 46 52 64;
+  --nord1: 59 66 82;
+  --nord2: 67 76 94;
+  --nord3: 76 86 106;
+  --nord4: 216 222 233;
+  --nord5: 229 233 240;
+  --nord6: 236 239 244;
 
   /* Semantic mapping */
   --muse-bg: #2E3440;
@@ -45,14 +45,14 @@
 }
 
 [data-theme="light"] {
-  /* Swap Polar Night ↔ Snow Storm */
-  --nord0: #ECEFF4;
-  --nord1: #E5E9F0;
-  --nord2: #D8DEE9;
-  --nord3: #C8CED9;
-  --nord4: #4C566A;
-  --nord5: #3B4252;
-  --nord6: #2E3440;
+  /* Swap Polar Night ↔ Snow Storm (RGB channels for Tailwind opacity) */
+  --nord0: 236 239 244;
+  --nord1: 229 233 240;
+  --nord2: 216 222 233;
+  --nord3: 200 206 217;
+  --nord4: 76 86 106;
+  --nord5: 59 66 82;
+  --nord6: 46 52 64;
 
   /* Semantic mapping — light */
   --muse-bg: #ECEFF4;
