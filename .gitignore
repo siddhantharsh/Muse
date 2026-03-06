@@ -8,6 +8,9 @@ build/
 # Environment variables (contains secrets)
 .env
 
+# Firebase cache
+.firebase/
+
 # PDFs (proprietary/reference docs)
 *.pdf
 
