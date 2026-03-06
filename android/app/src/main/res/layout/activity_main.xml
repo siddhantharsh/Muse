@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#2E3440">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <FrameLayout
+        android:id="@+id/errorView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#2E3440"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true">
+
+        <TextView
+            android:id="@+id/errorText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:textColor="#D8DEE9"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:padding="32dp"
+            android:lineSpacingMultiplier="1.4"
+            android:text="Connecting..." />
+
+    </FrameLayout>
+
+</FrameLayout>

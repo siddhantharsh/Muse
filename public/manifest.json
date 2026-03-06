@@ -1,0 +1,28 @@
+{
+  "name": "Muse",
+  "short_name": "Muse",
+  "description": "Autonomous Task Scheduler",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2E3440",
+  "theme_color": "#88C0D0",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-64.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

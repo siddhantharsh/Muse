@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment variables (contains secrets)
+.env
+
+# PDFs (proprietary/reference docs)
+*.pdf
+
+# Electron build artifacts
+dist/linux-unpacked/
+dist/*.AppImage
+dist/*.deb
+dist/*.exe
+dist/*.snap
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Android build
+android/app/build/
+android/.gradle/
+android/build/
+
+# TypeScript cache
+*.tsbuildinfo

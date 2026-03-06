@@ -1,0 +1,91 @@
+{
+  "name": "muse",
+  "version": "1.0.0",
+  "description": "Muse — Autonomous Task Scheduling Engine",
+  "author": {
+    "name": "Muse",
+    "email": "muse@scheduler.app"
+  },
+  "homepage": "https://github.com/muse-scheduler/muse",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "vite build && electron-builder --linux",
+    "electron:build:win": "vite build && electron-builder --win",
+    "electron:build:all": "vite build && electron-builder --linux --win",
+    "lint": "eslint src --ext ts,tsx"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "date-fns": "^3.6.0",
+    "immer": "^10.1.1",
+    "lucide-react": "^0.441.0",
+    "react": "^18.3.1",
+    "react-beautiful-dnd": "^13.1.1",
+    "react-dom": "^18.3.1",
+    "rrule": "^2.8.1",
+    "uuid": "^9.0.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "@types/react-beautiful-dnd": "^13.1.8",
+    "@types/react-dom": "^18.3.1",
+    "@types/uuid": "^9.0.8",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "electron": "^32.1.2",
+    "electron-builder": "^25.0.5",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.muse.scheduler",
+    "productName": "Muse",
+    "compression": "maximum",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "build/icons",
+      "synopsis": "Autonomous task scheduling engine",
+      "description": "Muse — A FlowSavvy-inspired autonomous task scheduler"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icons/256x256.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "installerIcon": "build/icons/256x256.png",
+      "uninstallerIcon": "build/icons/256x256.png",
+      "installerHeaderIcon": "build/icons/256x256.png",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Muse"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "public/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "asar": true
+  }
+}

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2E3440"/>
+      <stop offset="100%" stop-color="#3B4252"/>
+    </linearGradient>
+    <linearGradient id="frost" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#88C0D0"/>
+      <stop offset="100%" stop-color="#81A1C1"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#bg)" rx="64"/>
+  
+  <!-- Border frame -->
+  <rect x="16" y="16" width="480" height="480" fill="none" stroke="#4C566A" stroke-width="2" rx="48"/>
+  
+  <!-- Terminal window decoration -->
+  <rect x="40" y="40" width="432" height="32" fill="#3B4252" rx="0"/>
+  <circle cx="60" cy="56" r="6" fill="#BF616A"/>
+  <circle cx="80" cy="56" r="6" fill="#EBCB8B"/>
+  <circle cx="100" cy="56" r="6" fill="#A3BE8C"/>
+  
+  <!-- "M" letter - stylized terminal monospace -->
+  <text x="256" y="340" text-anchor="middle" font-family="monospace" font-size="260" font-weight="bold" fill="url(#frost)">M</text>
+  
+  <!-- Cursor blink line -->
+  <rect x="370" y="200" width="16" height="140" fill="#88C0D0" opacity="0.7">
+    <animate attributeName="opacity" values="0.7;0;0.7" dur="1.5s" repeatCount="indefinite"/>
+  </rect>
+  
+  <!-- Bottom status bar -->
+  <rect x="40" y="440" width="432" height="24" fill="#3B4252" rx="0"/>
+  <text x="56" y="456" font-family="monospace" font-size="12" fill="#88C0D0">muse v1.0 -- scheduler</text>
+  <text x="440" y="456" text-anchor="end" font-family="monospace" font-size="12" fill="#4C566A">■</text>
+</svg>

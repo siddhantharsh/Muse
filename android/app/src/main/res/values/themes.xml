@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Muse" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#88C0D0</item>
+        <item name="colorPrimaryVariant">#5E81AC</item>
+        <item name="colorOnPrimary">#2E3440</item>
+        <item name="colorSecondary">#A3BE8C</item>
+        <item name="colorOnSecondary">#2E3440</item>
+        <item name="android:colorBackground">#2E3440</item>
+        <item name="colorSurface">#3B4252</item>
+        <item name="colorOnSurface">#ECEFF4</item>
+        <item name="android:statusBarColor">#2E3440</item>
+        <item name="android:navigationBarColor">#2E3440</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
