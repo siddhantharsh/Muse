@@ -207,7 +207,7 @@ export function CalendarView() {
   return (
     <div className="h-full flex flex-col font-mono">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-nord3 bg-nord1">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-nord3/10 bg-nord1">
         <div className="flex items-center gap-2">
           <button onClick={goToToday} className="btn-secondary text-[10px] px-2 py-0.5">
             today
@@ -234,7 +234,7 @@ export function CalendarView() {
         </div>
 
         <div className="flex items-center gap-1">
-          <div className="flex border border-nord3">
+          <div className="flex border border-nord3/20">
             {[
               { mode: ViewMode.Day, label: 'day' },
               { mode: ViewMode.ThreeDay, label: '3d' },
@@ -247,7 +247,7 @@ export function CalendarView() {
                   ui.viewMode === mode
                     ? 'bg-nord8 text-nord0'
                     : 'text-nord4 hover:bg-nord2 hover:text-nord6'
-                } ${idx > 0 ? 'border-l border-nord3' : ''}`}
+                } ${idx > 0 ? 'border-l border-nord3/20' : ''}`}
               >
                 {label}
               </button>
@@ -257,15 +257,15 @@ export function CalendarView() {
       </div>
 
       {/* Day Headers */}
-      <div className="flex border-b border-nord3/20 bg-nord0 calendar-header-row">
-        <div className="w-14 flex-shrink-0 border-r border-nord3/20" />
+      <div className="flex border-b border-nord3/[0.08] bg-nord0 calendar-header-row">
+        <div className="w-14 flex-shrink-0 border-r border-nord3/[0.08]" />
         {columns.map((date, i) => {
           const today = isToday(date);
           return (
             <div
               key={date.toISOString()}
               className={`flex-1 px-1 py-1.5 text-center ${
-                i < columns.length - 1 ? 'border-r border-nord3/20' : ''
+                i < columns.length - 1 ? 'border-r border-nord3/[0.08]' : ''
               } ${today ? 'bg-nord8/10' : ''}`}
             >
               <div className={`text-[10px] font-bold uppercase tracking-wider ${today ? 'text-nord8' : 'text-nord3'}`}>
@@ -292,7 +292,7 @@ export function CalendarView() {
       <div ref={scrollRef} className="flex-1 calendar-scroll relative">
         <div className="flex" style={{ minHeight: hours.length * HOUR_HEIGHT }}>
           {/* Time Gutter */}
-          <div className="w-14 flex-shrink-0 border-r border-nord3/20">
+          <div className="w-14 flex-shrink-0 border-r border-nord3/[0.08]">
             {hours.map((hour) => (
               <div key={hour} className="relative" style={{ height: HOUR_HEIGHT }}>
                 <span className="absolute -top-2 right-1.5 text-[10px] text-nord3 font-mono">
@@ -329,7 +329,7 @@ export function CalendarView() {
               <div
                 key={dayStr}
                 className={`flex-1 relative ${
-                  colIdx < columns.length - 1 ? 'border-r border-nord3/15' : ''
+                  colIdx < columns.length - 1 ? 'border-r border-nord3/[0.06]' : ''
                 } ${isBeyondCutoff ? 'cutoff-stripes' : ''} ${today ? 'bg-nord8/[0.03]' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, date)}
@@ -337,11 +337,11 @@ export function CalendarView() {
                 {hours.map((hour) => (
                   <div
                     key={hour}
-                    className="border-t border-nord3/15 cursor-pointer hover:bg-nord2/30 transition-colors"
+                    className="border-t border-nord3/[0.06] cursor-pointer hover:bg-nord2/30 transition-colors"
                     style={{ height: HOUR_HEIGHT }}
                     onDoubleClick={(e) => handleTimeSlotClick(date, hour, e)}
                   >
-                    <div className="border-t border-nord3/10" style={{ height: 0, marginTop: HOUR_HEIGHT / 2 }} />
+                    <div className="border-t border-nord3/[0.03]" style={{ height: 0, marginTop: HOUR_HEIGHT / 2 }} />
                   </div>
                 ))}
 
@@ -412,8 +412,8 @@ function AllDayRow({ columns, events }: { columns: Date[]; events: CalendarEvent
   if (allDayEvents.length === 0) return null;
 
   return (
-    <div className="flex border-b border-nord3 bg-nord0/50 calendar-header-row">
-      <div className="w-14 flex-shrink-0 flex items-center justify-end pr-1 border-r border-nord3">
+    <div className="flex border-b border-nord3/10 bg-nord0/50 calendar-header-row">
+      <div className="w-14 flex-shrink-0 flex items-center justify-end pr-1 border-r border-nord3/10">
         <span className="text-[9px] text-nord3 font-mono">ALL</span>
       </div>
       {columns.map((date, i) => {
@@ -421,7 +421,7 @@ function AllDayRow({ columns, events }: { columns: Date[]; events: CalendarEvent
         return (
           <div
             key={date.toISOString()}
-            className={`flex-1 ${i < columns.length - 1 ? 'border-r border-nord3' : ''} px-0.5 py-0.5 min-h-[24px]`}
+            className={`flex-1 ${i < columns.length - 1 ? 'border-r border-nord3/10' : ''} px-0.5 py-0.5 min-h-[24px]`}
           >
             {dayEvents.map((event) => (
               <div

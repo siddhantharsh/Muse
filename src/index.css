@@ -113,13 +113,13 @@ html, body, #root {
   transition: all 0.1s ease;
 }
 
-/* Calendar grid lines — very subtle borders */
+/* Calendar grid lines — barely visible structure */
 .grid-line {
-  border-top: 1px solid rgba(76, 86, 106, 0.12);
+  border-top: 1px solid rgba(76, 86, 106, 0.05);
 }
 
 .grid-line-hour {
-  border-top: 1px solid rgba(76, 86, 106, 0.25);
+  border-top: 1px solid rgba(76, 86, 106, 0.1);
 }
 
 /* Scrollable areas */
