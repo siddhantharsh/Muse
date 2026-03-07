@@ -609,10 +609,13 @@ function placeTasksInSlots(
           consumeSlot(slots, i, blockStart, blockEnd);
 
           // Also consume from ALL other profiles to prevent cross-profile double-booking
+          // Use non-strict (<=, >=) so boundary-touching fragments are skipped
+          const bsMs = blockStart.getTime();
+          const beMs = blockEnd.getTime();
           consumableSlots.forEach((otherSlots, key) => {
             if (key === profileId) return;
             for (let j = 0; j < otherSlots.length; j++) {
-              if (isBefore(otherSlots[j].end, blockStart) || isAfter(otherSlots[j].start, blockEnd)) continue;
+              if (otherSlots[j].end.getTime() <= bsMs || otherSlots[j].start.getTime() >= beMs) continue;
               consumeSlot(otherSlots, j, blockStart, blockEnd);
               j--; // re-check after splice
             }
@@ -648,10 +651,12 @@ function placeTasksInSlots(
           consumeSlot(slots, i, nsBlockStart, nsBlockEnd);
 
           // Also consume from ALL other profiles to prevent cross-profile double-booking
+          const nsBsMs = nsBlockStart.getTime();
+          const nsBeMs = nsBlockEnd.getTime();
           consumableSlots.forEach((otherSlots, key) => {
             if (key === profileId) return;
             for (let j = 0; j < otherSlots.length; j++) {
-              if (isBefore(otherSlots[j].end, nsBlockStart) || isAfter(otherSlots[j].start, nsBlockEnd)) continue;
+              if (otherSlots[j].end.getTime() <= nsBsMs || otherSlots[j].start.getTime() >= nsBeMs) continue;
               consumeSlot(otherSlots, j, nsBlockStart, nsBlockEnd);
               j--;
             }
