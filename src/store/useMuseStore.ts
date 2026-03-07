@@ -534,6 +534,7 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
       },
     }));
     get().persist();
+    debouncedRecalculate(() => get().recalculate());
     return newProfile;
   },
 
@@ -547,9 +548,19 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
       },
     }));
     get().persist();
+    debouncedRecalculate(() => get().recalculate());
   },
 
   deleteSchedulingProfile: (id) => {
+    // Reassign tasks using this profile to null (will use _default)
+    const tasksToFix = get().tasks.filter((t) => t.schedulingHoursId === id);
+    if (tasksToFix.length > 0) {
+      set((state) => ({
+        tasks: state.tasks.map((t) =>
+          t.schedulingHoursId === id ? { ...t, schedulingHoursId: null, updatedAt: nowISO() } : t
+        ),
+      }));
+    }
     set((state) => ({
       settings: {
         ...state.settings,
@@ -558,6 +569,7 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
       },
     }));
     get().persist();
+    debouncedRecalculate(() => get().recalculate());
   },
 
   // ---- UI Actions ----

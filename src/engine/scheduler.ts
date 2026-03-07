@@ -487,9 +487,12 @@ function placeTasksInSlots(
       continue;
     }
 
-    // Get the correct slot pool
+    // Get the correct slot pool — fall through to _default if profile has no slots
     const profileId = task.schedulingHoursId || '_default';
-    const slots = consumableSlots.get(profileId) || consumableSlots.get('_default') || [];
+    let slots = consumableSlots.get(profileId);
+    if (!slots || slots.length === 0) {
+      slots = consumableSlots.get('_default') || [];
+    }
 
     // Place the task
     const blocks: ScheduledBlock[] = [];
