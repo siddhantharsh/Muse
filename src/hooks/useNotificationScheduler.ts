@@ -1,14 +1,15 @@
 // ============================================================
 // Muse — Notification Scheduler
-// Periodically checks for upcoming tasks/events and fires
-// desktop notifications via Electron's Notification API
+// Checks once per minute for upcoming tasks/events and fires
+// exactly ONE notification per item at the configured lead time
 // ============================================================
 
 import { useEffect, useRef } from 'react';
 import { useMuseStore } from '../store/useMuseStore';
 import { parseISO, differenceInMinutes } from 'date-fns';
 
-// Track which items we've already notified about to avoid duplicates
+// Track which items we've already notified about (block/event ID → true)
+// Persists across re-renders since it's module-level
 const notifiedIds = new Set<string>();
 
 export function useNotificationScheduler() {
@@ -30,27 +31,32 @@ export function useNotificationScheduler() {
       const now = new Date();
       const minutesBefore = settings.notifyMinutesBefore;
 
-      // Check task scheduled blocks
+      // Check task scheduled blocks — notify ONCE when within the lead window
+      // Key uses task.id + startTime (not block.id) so it's stable across recalculates
       for (const task of tasks) {
         if (task.completed) continue;
         for (const block of task.scheduledBlocks) {
-          const key = `task-${block.id}`;
+          const key = `task-${task.id}-${block.startTime}`;
           if (notifiedIds.has(key)) continue;
 
           const blockStart = parseISO(block.startTime);
           const diffMins = differenceInMinutes(blockStart, now);
 
+          // Only notify once: when diff first enters [0, minutesBefore]
+          // Once notified, it's added to the set and never fires again
           if (diffMins >= 0 && diffMins <= minutesBefore) {
-            fireNotification(
-              `Task: ${task.title}`,
-              `Starting in ${diffMins} minute${diffMins !== 1 ? 's' : ''}`
-            );
+            const label = diffMins <= 0 ? 'now' : `in ${diffMins} min`;
+            fireNotification(`Task: ${task.title}`, `Starting ${label}`);
+            notifiedIds.add(key);
+          }
+          // Also mark as notified if it's already past (missed window)
+          if (diffMins < 0) {
             notifiedIds.add(key);
           }
         }
       }
 
-      // Check events
+      // Check events — same logic
       for (const event of events) {
         if (event.allDay) continue;
         const key = `event-${event.id}`;
@@ -60,23 +66,27 @@ export function useNotificationScheduler() {
         const diffMins = differenceInMinutes(eventStart, now);
 
         if (diffMins >= 0 && diffMins <= minutesBefore) {
+          const label = diffMins <= 0 ? 'now' : `in ${diffMins} min`;
           fireNotification(
             `Event: ${event.title}`,
-            `Starting in ${diffMins} minute${diffMins !== 1 ? 's' : ''}${event.location ? ` @ ${event.location}` : ''}`
+            `Starting ${label}${event.location ? ` @ ${event.location}` : ''}`
           );
+          notifiedIds.add(key);
+        }
+        if (diffMins < 0) {
           notifiedIds.add(key);
         }
       }
 
-      // Clean up old notification IDs (older than 1 hour)
-      if (notifiedIds.size > 500) {
+      // Prune old entries periodically (keep set from growing unbounded)
+      if (notifiedIds.size > 200) {
         notifiedIds.clear();
       }
     };
 
-    // Check every 30 seconds
+    // Check every 60 seconds (not 30 — reduces spam + CPU)
     checkNotifications();
-    timerRef.current = setInterval(checkNotifications, 30000);
+    timerRef.current = setInterval(checkNotifications, 60000);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);

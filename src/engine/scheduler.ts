@@ -326,7 +326,9 @@ function computeProfileSlots(
   cutoff: Date
 ): TimeSlot[] {
   const allSlots: TimeSlot[] = [];
-  let current = startOfDay(now);
+  // Start 1 day before now so cross-midnight blocks from yesterday
+  // (e.g., 22:00→06:00) produce this-morning availability (e.g., 01:30→06:00)
+  let current = addDays(startOfDay(now), -1);
 
   while (isBefore(current, cutoff)) {
     const dayOfWeek = getDay(current);
@@ -346,6 +348,12 @@ function computeProfileSlots(
 
         let blockEnd = new Date(current);
         blockEnd.setHours(endH, endM, 0, 0);
+
+        // Handle midnight crossover: if end time <= start time, the block
+        // spans past midnight into the next day (e.g., 19:00 → 00:00)
+        if (endH < startH || (endH === startH && endM <= startM)) {
+          blockEnd = addDays(blockEnd, 1);
+        }
 
         // Clamp to now if the start is in the past
         if (isBefore(blockStart, now)) {
@@ -367,7 +375,22 @@ function computeProfileSlots(
     current = addDays(current, 1);
   }
 
-  return allSlots;
+  // Merge overlapping / adjacent slots (can happen with cross-midnight blocks)
+  allSlots.sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: TimeSlot[] = [];
+  for (const slot of allSlots) {
+    const last = merged[merged.length - 1];
+    if (last && !isAfter(slot.start, last.end)) {
+      // Overlapping or adjacent — extend
+      if (isAfter(slot.end, last.end)) {
+        last.end = new Date(slot.end);
+        last.duration = differenceInMinutes(last.end, last.start);
+      }
+    } else {
+      merged.push({ start: new Date(slot.start), end: new Date(slot.end), duration: slot.duration });
+    }
+  }
+  return merged;
 }
 
 function subtractBusy(
@@ -487,12 +510,10 @@ function placeTasksInSlots(
       continue;
     }
 
-    // Get the correct slot pool — fall through to _default if profile has no slots
+    // Get the correct slot pool — ONLY use the assigned profile (no fallback)
+    // If a user chose "Study Hours", tasks MUST schedule within those hours, not random daytime
     const profileId = task.schedulingHoursId || '_default';
-    let slots = consumableSlots.get(profileId);
-    if (!slots || slots.length === 0) {
-      slots = consumableSlots.get('_default') || [];
-    }
+    const slots = consumableSlots.get(profileId) || [];
 
     // Place the task
     const blocks: ScheduledBlock[] = [];
@@ -545,19 +566,25 @@ function placeTasksInSlots(
           continue; // Skip slots smaller than min block (unless it's the last bit)
         }
 
+        // Compute max block size:
+        // - Balanced mode: spread across days proportionally
+        // - Front-load mode: cap at minBlockDuration to still respect splitting
+        const horizonDays = Math.max(1, differenceInDays(
+          task.dueDate ? parseISO(task.dueDate) : cutoff,
+          slotStart
+        ));
+        const spreadTarget = Math.max(
+          task.minBlockDuration,
+          Math.ceil(remainingToPlace / horizonDays)
+        );
+        const maxPerSlot = isBalanced
+          ? spreadTarget
+          : Math.max(task.minBlockDuration, Math.min(spreadTarget, task.minBlockDuration * 2));
+
         const blockDuration = Math.min(
           remainingToPlace,
           slotDuration,
-          // For balanced mode, limit per-slot placement
-          isBalanced
-            ? Math.max(
-                task.minBlockDuration,
-                Math.ceil(remainingToPlace / Math.max(1, differenceInDays(
-                  task.dueDate ? parseISO(task.dueDate) : cutoff,
-                  slotStart
-                )))
-              )
-            : remainingToPlace
+          maxPerSlot
         );
 
         if (blockDuration >= Math.min(task.minBlockDuration, remainingToPlace)) {
@@ -576,12 +603,24 @@ function placeTasksInSlots(
           const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
           dailyPlaced.set(dayKey, (dailyPlaced.get(dayKey) || 0) + blockDuration);
 
-          // Consume the slot and fix index to not skip the after-fragment
-          const prevLen = slots.length;
-          consumeSlot(slots, i, slotStart, addMinutes(slotStart, blockDuration));
-          // After splice: slots.length changed by (newFragments - 1). Adjust so loop i++ lands correctly.
-          i -= (prevLen - slots.length);
-          if (i < -1) i = -1;
+          // Consume the used portion from this profile's slots
+          const blockStart = slotStart;
+          const blockEnd = addMinutes(slotStart, blockDuration);
+          consumeSlot(slots, i, blockStart, blockEnd);
+
+          // Also consume from ALL other profiles to prevent cross-profile double-booking
+          consumableSlots.forEach((otherSlots, key) => {
+            if (key === profileId) return;
+            for (let j = 0; j < otherSlots.length; j++) {
+              if (isBefore(otherSlots[j].end, blockStart) || isAfter(otherSlots[j].start, blockEnd)) continue;
+              consumeSlot(otherSlots, j, blockStart, blockEnd);
+              j--; // re-check after splice
+            }
+          });
+
+          // Decrement so loop's i++ revisits this index — the after-fragment
+          // (remaining available time in this window) now sits here
+          i--;
         }
       } else {
         // Non-splittable: need a contiguous block
@@ -603,16 +642,23 @@ function placeTasksInSlots(
             (dailyPlaced.get(dayKey) || 0) + remainingToPlace
           );
 
-          // Consume the slot and fix index
-          const prevLen2 = slots.length;
-          consumeSlot(
-            slots,
-            i,
-            slotStart,
-            addMinutes(slotStart, remainingToPlace)
-          );
-          i -= (prevLen2 - slots.length);
-          if (i < -1) i = -1;
+          // Consume the used portion from this profile's slots
+          const nsBlockStart = slotStart;
+          const nsBlockEnd = addMinutes(slotStart, remainingToPlace);
+          consumeSlot(slots, i, nsBlockStart, nsBlockEnd);
+
+          // Also consume from ALL other profiles to prevent cross-profile double-booking
+          consumableSlots.forEach((otherSlots, key) => {
+            if (key === profileId) return;
+            for (let j = 0; j < otherSlots.length; j++) {
+              if (isBefore(otherSlots[j].end, nsBlockStart) || isAfter(otherSlots[j].start, nsBlockEnd)) continue;
+              consumeSlot(otherSlots, j, nsBlockStart, nsBlockEnd);
+              j--;
+            }
+          });
+
+          // Non-splittable is done after one placement, no need to revisit
+          i--;
 
           remainingToPlace = 0;
         }
