@@ -11,6 +11,7 @@ import {
   cloudGetVersion,
   getCloudUser,
   isCloudConfigured,
+  onAuthStateChange,
 } from '../utils/cloudSync';
 
 const PUSH_DEBOUNCE = 3000;   // 3s debounce for pushing local changes
@@ -26,7 +27,6 @@ export function useCloudSync() {
   const lastPushHash = useRef<string>('');
   const lastRemoteVersion = useRef<string | null>(null);
   const isPulling = useRef(false);    // guard against pull→push loops
-  const initialPullDone = useRef(false);
 
   // ── Pull remote state and apply it ──
   const pullRemote = useCallback(async (force = false) => {
@@ -59,23 +59,37 @@ export function useCloudSync() {
       useMuseStore.getState().persist();
 
       // Update push hash so we don't immediately re-push what we just pulled
-      const hash = buildHash(remote.tasks, remote.events, remote.lists);
+      const hash = buildHash(remote.tasks, remote.events, remote.lists, remote.settings);
       lastPushHash.current = hash;
 
       console.log('[Muse Cloud] Pulled remote state', remoteVersion);
 
-      // Release guard after a tick so the setState-triggered push is skipped
-      setTimeout(() => { isPulling.current = false; }, 500);
+      // Trigger recalculate to refresh scheduling — blocks may be stale or missing
+      useMuseStore.getState().recalculate();
+
+      // Release guard after recalculate debounce + buffer
+      setTimeout(() => { isPulling.current = false; }, 1500);
     } catch (e) {
       isPulling.current = false;
       console.error('[Muse Cloud] Pull failed:', e);
     }
   }, []);
 
-  // ── Initial pull on mount ──
+  // ── Pull on auth state change (handles sign-in after mount) ──
   useEffect(() => {
-    if (!isCloudConfigured() || initialPullDone.current) return;
-    initialPullDone.current = true;
+    if (!isCloudConfigured()) return;
+    const { data } = onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        // User just signed in — pull remote data immediately
+        console.log('[Muse Cloud] Auth signed in — pulling remote data');
+        pullRemote(true);
+      }
+    });
+    return () => { data.subscription.unsubscribe(); };
+  }, [pullRemote]);
+
+  // ── Also try pulling on mount (for page refresh when already signed in) ──
+  useEffect(() => {
     pullRemote(true);
   }, [pullRemote]);
 
@@ -105,8 +119,8 @@ export function useCloudSync() {
           settings: state.settings,
         };
 
-        // Skip if nothing changed
-        const hash = buildHash(payload.tasks, payload.events, payload.lists);
+        // Skip if nothing changed (hash includes settings now)
+        const hash = buildHash(payload.tasks, payload.events, payload.lists, payload.settings);
         if (hash === lastPushHash.current) return;
         lastPushHash.current = hash;
 
@@ -134,8 +148,8 @@ export function useCloudSync() {
   }, []);
 }
 
-/** Build a hash string to detect meaningful state changes */
-function buildHash(tasks: any[], events: any[], lists: any[]): string {
+/** Build a hash string to detect meaningful state changes (includes settings) */
+function buildHash(tasks: any[], events: any[], lists: any[], settings?: any): string {
   return JSON.stringify({
     tc: tasks.length,
     ec: events.length,
@@ -143,6 +157,8 @@ function buildHash(tasks: any[], events: any[], lists: any[]): string {
     // Include recent updatedAt timestamps to catch edits
     tu: tasks.map((t: any) => `${t.id}:${t.updatedAt || ''}`).sort().join(','),
     eu: events.map((e: any) => `${e.id}:${e.updatedAt || ''}`).sort().join(','),
+    // Include settings hash so settings-only changes get synced
+    sh: settings ? JSON.stringify(settings) : '',
   });
 }
 

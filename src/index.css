@@ -202,16 +202,19 @@ html, body, #root {
   background: #BF616A;
   z-index: 20;
   pointer-events: none;
+  box-shadow: 0 0 4px 1px rgba(191, 97, 106, 0.5);
 }
 
 .now-line::before {
   content: '';
   position: absolute;
-  left: -3px;
-  top: -3px;
-  width: 8px;
-  height: 8px;
+  left: -4px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
   background: #BF616A;
+  border-radius: 50%;
+  box-shadow: 0 0 6px 2px rgba(191, 97, 106, 0.4);
 }
 
 /* Progress bar — frost gradient */

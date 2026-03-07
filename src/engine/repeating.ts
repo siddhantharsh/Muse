@@ -15,6 +15,7 @@ import {
   isBefore,
   isAfter,
   differenceInMinutes,
+  differenceInDays,
 } from 'date-fns';
 
 function toLocalISO(d: Date): string {
@@ -89,9 +90,16 @@ export function generateRepeatingTaskInstances(
         parentRepeatingId: parentTask.id,
         repeatingRule: null, // instances don't repeat
         dueDate: toLocalISO(current),
-        startAfter: parentTask.startAfter
-          ? toLocalISO(addDays(current, -1)) // start day before due
-          : null,
+        // Preserve the parent's startAfter-to-dueDate gap so the scheduler
+        // has the same scheduling window for each instance
+        startAfter: parentTask.startAfter && parentTask.dueDate
+          ? toLocalISO(addDays(current, -differenceInDays(
+              parseISO(parentTask.dueDate),
+              parseISO(parentTask.startAfter)
+            )))
+          : parentTask.startAfter
+            ? toLocalISO(addDays(current, -1)) // fallback: 1 day before due
+            : null,
         completed: false,
         completedAt: null,
         progress: 0,
@@ -198,15 +206,23 @@ function getNextOccurrence(current: Date, rule: RepeatingRule): Date {
 
     case RepeatFrequency.Weekly:
       if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
-        // Find next day of week
-        let next = addDays(current, 1);
-        for (let i = 0; i < 7 * interval; i++) {
-          if (rule.daysOfWeek.includes(next.getDay())) {
-            return next;
-          }
-          next = addDays(next, 1);
+        // For weekly with interval, we must respect the interval cycle.
+        // First try remaining matching days in the current week.
+        const sortedDays = [...rule.daysOfWeek].sort((a, b) => a - b);
+        const currentDay = current.getDay();
+        
+        // Find the next matching day in the SAME week (after current day)
+        const nextInSameWeek = sortedDays.find((d) => d > currentDay);
+        if (nextInSameWeek !== undefined) {
+          return addDays(current, nextInSameWeek - currentDay);
         }
-        return addWeeks(current, interval);
+        
+        // No more matching days this week — jump forward by `interval` weeks
+        // to the first matching day of that target week
+        const daysUntilWeekEnd = 7 - currentDay; // days to get to Sunday (0)
+        const firstMatchDay = sortedDays[0];
+        const daysToJump = daysUntilWeekEnd + (interval - 1) * 7 + firstMatchDay;
+        return addDays(current, daysToJump);
       }
       return addWeeks(current, interval);
 

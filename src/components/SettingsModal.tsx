@@ -997,7 +997,7 @@ function CalendarSyncSettings({ importICS, exportICS }: { importICS: (content: s
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       const text = await file.text();
-      const count = importICS(text);
+      const count = await importICS(text);
       setImportStatus(`Imported ${count} event${count !== 1 ? 's' : ''}`);
       setTimeout(() => setImportStatus(null), 3000);
     };

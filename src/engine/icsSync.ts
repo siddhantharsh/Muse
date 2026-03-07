@@ -81,9 +81,10 @@ function icsEntryToEvent(entry: Record<string, string>): Partial<CalendarEvent> 
 
 function parseICSDate(dateStr: string): Date {
   // Formats: 20240101T090000Z, 20240101T090000, 20240101
+  const isUTC = dateStr.endsWith('Z');
   const clean = dateStr.replace(/Z$/, '');
   if (clean.length === 8) {
-    // All day: YYYYMMDD
+    // All day: YYYYMMDD — always local
     return new Date(
       parseInt(clean.slice(0, 4)),
       parseInt(clean.slice(4, 6)) - 1,
@@ -91,14 +92,19 @@ function parseICSDate(dateStr: string): Date {
     );
   }
   // DateTime: YYYYMMDDTHHMMSS
-  return new Date(
-    parseInt(clean.slice(0, 4)),
-    parseInt(clean.slice(4, 6)) - 1,
-    parseInt(clean.slice(6, 8)),
-    parseInt(clean.slice(9, 11)),
-    parseInt(clean.slice(11, 13)),
-    parseInt(clean.slice(13, 15))
-  );
+  const year = parseInt(clean.slice(0, 4));
+  const month = parseInt(clean.slice(4, 6)) - 1;
+  const day = parseInt(clean.slice(6, 8));
+  const hour = parseInt(clean.slice(9, 11));
+  const min = parseInt(clean.slice(11, 13));
+  const sec = parseInt(clean.slice(13, 15));
+
+  if (isUTC) {
+    // Create UTC date, then convert to local by using Date.UTC
+    return new Date(Date.UTC(year, month, day, hour, min, sec));
+  }
+  // No timezone marker — treat as local time
+  return new Date(year, month, day, hour, min, sec);
 }
 
 function unescapeICS(str: string): string {

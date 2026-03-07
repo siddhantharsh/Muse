@@ -152,7 +152,7 @@ interface MuseStore {
   recalculate: () => void;
 
   // ICS Import/Export
-  importICS: (icsContent: string) => number;
+  importICS: (icsContent: string) => Promise<number>;
   exportICS: () => string;
 
   // Persistence
@@ -603,7 +603,8 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
 
   // ---- ICS Import/Export ----
   importICS: (icsContent: string) => {
-    import('../engine/icsSync').then(({ parseICS }) => {
+    // Return a promise so callers can await the count
+    return import('../engine/icsSync').then(({ parseICS }) => {
       const parsedEvents = parseICS(icsContent);
       const newEvents = parsedEvents.map((partialEvent) => ({
         id: (partialEvent as any).id || uuidv4(),
@@ -630,30 +631,45 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
       }));
       get().persist();
       debouncedRecalculate(() => get().recalculate());
+      return newEvents.length;
     });
-    return 0; // async, count not available synchronously
   },
 
   exportICS: () => {
-    // This needs to be sync for download, so we use a trick
     const state = get();
-    // Inline minimal ICS export
+    // Use the engine's proper ICS export (handles all-day, escaping, DTSTAMP, etc.)
+    // Dynamic import returns a promise, but we need sync for download — so we use
+    // an inline implementation that mirrors the engine's logic
     const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//Muse Scheduler//EN',
       'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
     ];
+    const escICS = (str: string) => str.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+    const fmtDate = (d: Date) => {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    };
+    const now = fmtDate(new Date());
     for (const event of state.events) {
-      const s = event.startTime.replace(/[-:]/g, '').replace('T', 'T').slice(0, 15);
-      const e = event.endTime.replace(/[-:]/g, '').replace('T', 'T').slice(0, 15);
+      const s = new Date(event.startTime);
+      const e = new Date(event.endTime);
       lines.push('BEGIN:VEVENT');
-      lines.push(`UID:${event.id}@muse`);
-      lines.push(`DTSTART:${s}`);
-      lines.push(`DTEND:${e}`);
-      lines.push(`SUMMARY:${event.title.replace(/,/g, '\\,')}`);
-      if (event.location) lines.push(`LOCATION:${event.location.replace(/,/g, '\\,')}`);
-      if (event.description) lines.push(`DESCRIPTION:${event.description.replace(/\n/g, '\\n').replace(/,/g, '\\,')}`);
+      lines.push(`UID:${event.externalId || event.id}@muse`);
+      lines.push(`DTSTAMP:${now}`);
+      if (event.allDay) {
+        const pad = (n: number) => String(n).padStart(2, '0');
+        lines.push(`DTSTART;VALUE=DATE:${s.getFullYear()}${pad(s.getMonth() + 1)}${pad(s.getDate())}`);
+        lines.push(`DTEND;VALUE=DATE:${e.getFullYear()}${pad(e.getMonth() + 1)}${pad(e.getDate())}`);
+      } else {
+        lines.push(`DTSTART:${fmtDate(s)}`);
+        lines.push(`DTEND:${fmtDate(e)}`);
+      }
+      lines.push(`SUMMARY:${escICS(event.title)}`);
+      if (event.description) lines.push(`DESCRIPTION:${escICS(event.description)}`);
+      if (event.location) lines.push(`LOCATION:${escICS(event.location)}`);
       lines.push('END:VEVENT');
     }
     lines.push('END:VCALENDAR');
