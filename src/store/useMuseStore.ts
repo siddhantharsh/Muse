@@ -725,7 +725,9 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
       const repeatingParentIds = new Set(
         allTasks.filter((t) => t.repeatingRule && !t.isRepeatingInstance).map((t) => t.id)
       );
-      const MAX_UPCOMING = 3;
+      // Generate enough instances to fill the entire scheduling window
+      // (8-week cutoff ≈ 56 days; daily tasks need ~60 instances)
+      const MAX_UPCOMING = 60;
       for (const parentId of repeatingParentIds) {
         const futureInstances = allTasks
           .filter((t) => t.parentRepeatingId === parentId && !t.completed && t.dueDate)
@@ -736,7 +738,7 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
         }
       }
 
-      // Generate repeating task instances (limited to 3 upcoming)
+      // Generate repeating task instances up to the scheduling cutoff
       const repeatingTasks = allTasks.filter((t) => t.repeatingRule && !t.isRepeatingInstance);
       for (const parent of repeatingTasks) {
         const newInstances = generateRepeatingTaskInstances(parent, allTasks, cutoff, MAX_UPCOMING);
@@ -767,7 +769,7 @@ export const useMuseStore = create<MuseStore>((set, get) => ({
         }
       }
 
-      // Generate repeating event instances (limited to 3 upcoming)
+      // Generate repeating event instances up to the scheduling cutoff
       const repeatingEvents = allEvents.filter((e) => e.repeatingRule);
       for (const parent of repeatingEvents) {
         const newInstances = generateRepeatingEventInstances(parent, allEvents, cutoff, MAX_UPCOMING);

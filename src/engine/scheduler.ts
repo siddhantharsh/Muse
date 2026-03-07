@@ -528,7 +528,12 @@ function placeTasksInSlots(
       settings.distributionModel === DistributionModel.Balanced &&
       !forceFrontLoad;
 
+    // Safety cap: prevent runaway loops (max iterations = 2× slot count)
+    const maxIterations = slots.length * 2 + 100;
+    let iterations = 0;
+
     for (let i = 0; i < slots.length && remainingToPlace > 0; i++) {
+      if (++iterations > maxIterations) break; // safety valve
       const slot = slots[i];
 
       // Skip slots before effective start
