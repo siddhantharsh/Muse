@@ -59,11 +59,13 @@ export function runScheduler(
   updatedTasks = handleAutoIgnore(updatedTasks, now);
 
   // Step 3: Filter tasks that need scheduling
+  // Exclude repeating parents — they are templates; only their instances get scheduled
   const tasksToSchedule = updatedTasks.filter(
     (t) =>
       t.autoSchedule &&
       !t.completed &&
       !t.inInbox &&
+      !t.repeatingRule &&
       t.duration - t.progress > 0
   );
 

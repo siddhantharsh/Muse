@@ -83,6 +83,24 @@ export function generateRepeatingTaskInstances(
 
     // Only create if instance doesn't already exist
     if (!existingDueDates.has(dateKey)) {
+      // Compute startAfter: constrain each instance so it only schedules
+      // on or near its intended day (prevents all instances piling up on today)
+      let instanceStartAfter: string;
+      if (parentTask.startAfter && parentTask.dueDate) {
+        // Preserve the parent's startAfter-to-dueDate gap
+        const gap = differenceInDays(
+          parseISO(parentTask.dueDate),
+          parseISO(parentTask.startAfter)
+        );
+        instanceStartAfter = toLocalISO(addDays(current, -gap));
+      } else {
+        // Default: instance can only be scheduled on its due day
+        // (start of day — the scheduler will find profile slots from here)
+        const dayStart = new Date(current);
+        dayStart.setHours(0, 0, 0, 0);
+        instanceStartAfter = toLocalISO(dayStart);
+      }
+
       const instance: Task = {
         ...parentTask,
         id: uuidv4(),
@@ -90,16 +108,7 @@ export function generateRepeatingTaskInstances(
         parentRepeatingId: parentTask.id,
         repeatingRule: null, // instances don't repeat
         dueDate: toLocalISO(current),
-        // Preserve the parent's startAfter-to-dueDate gap so the scheduler
-        // has the same scheduling window for each instance
-        startAfter: parentTask.startAfter && parentTask.dueDate
-          ? toLocalISO(addDays(current, -differenceInDays(
-              parseISO(parentTask.dueDate),
-              parseISO(parentTask.startAfter)
-            )))
-          : parentTask.startAfter
-            ? toLocalISO(addDays(current, -1)) // fallback: 1 day before due
-            : null,
+        startAfter: instanceStartAfter,
         completed: false,
         completedAt: null,
         progress: 0,
