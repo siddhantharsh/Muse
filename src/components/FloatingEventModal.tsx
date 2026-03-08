@@ -46,7 +46,7 @@ export function FloatingEventModal() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showRepeatDropdown, setShowRepeatDropdown] = useState(false);
 
-  // Dragging logic
+  // Dragging logic-
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       setIsDragging(true);

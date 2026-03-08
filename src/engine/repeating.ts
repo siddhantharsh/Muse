@@ -109,6 +109,15 @@ export function generateRepeatingTaskInstances(
         repeatingRule: null, // instances don't repeat
         dueDate: toLocalISO(current),
         startAfter: instanceStartAfter,
+        // Always copy the latest schedulingHoursId and all relevant scheduling fields
+        schedulingHoursId: parentTask.schedulingHoursId || null,
+        priority: parentTask.priority,
+        splittable: parentTask.splittable,
+        minBlockDuration: parentTask.minBlockDuration,
+        autoSchedule: parentTask.autoSchedule,
+        color: parentTask.color,
+        listId: parentTask.listId,
+        // Reset completion/progress
         completed: false,
         completedAt: null,
         progress: 0,
