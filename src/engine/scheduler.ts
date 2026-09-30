@@ -22,10 +22,8 @@ import {
   addDays,
   addWeeks,
   startOfDay,
-  endOfDay,
   isBefore,
   isAfter,
-  isSameDay,
   differenceInMinutes,
   differenceInDays,
   getDay,
@@ -49,95 +47,227 @@ export function runScheduler(
   const now = new Date();
   const cutoffDate = addWeeks(now, settings.autoSchedulingCutoffWeeks);
 
-  // Step 1: Compute urgency colors for all tasks
-  let updatedTasks = tasks.map((task) => ({
-    ...task,
-    urgencyColor: computeUrgencyColor(task, now),
-  }));
+  // Step 1: Handle auto-ignore for repeating tasks with missed deadlines
+  let updatedTasks = handleAutoIgnore(tasks, now);
 
-  // Step 2: Handle auto-ignore for repeating tasks with missed deadlines
-  updatedTasks = handleAutoIgnore(updatedTasks, now);
-
-  // Step 3: Filter tasks that need scheduling
-  // Exclude repeating parents — they are templates; only their instances get scheduled
+  // Step 2: Filter tasks that need scheduling.
+  // Repeating templates are excluded — only their instances get scheduled.
+  // A repeating occurrence whose deadline already passed is "missed": it
+  // waits in Missed Deadlines for a decision instead of piling onto today
+  // (the next occurrence already covers the habit going forward).
   const tasksToSchedule = updatedTasks.filter(
     (t) =>
       t.autoSchedule &&
       !t.completed &&
       !t.inInbox &&
       !t.repeatingRule &&
-      t.duration - t.progress > 0
+      t.duration - t.progress > 0 &&
+      !(t.isRepeatingInstance && t.dueDate && isBefore(parseISO(t.dueDate), now))
   );
 
-  // Step 4: Sort tasks by scheduling priority
-  const sortedTasks = sortBySchedulingPriority(tasksToSchedule);
-
-  // Step 5: Build the busy map (events + manually pinned tasks)
+  // Step 3: Build the busy map (events + manually pinned tasks)
   const busySlots = buildBusyMap(events, updatedTasks, now, cutoffDate);
 
-  // Step 6: Build available slots per scheduling hours profile
-  const availableSlots = buildAvailableSlots(
-    settings,
-    busySlots,
-    now,
-    cutoffDate
-  );
+  // Step 4: Build available slots per scheduling hours profile
+  const availableSlots = buildAvailableSlots(settings, busySlots, now, cutoffDate);
 
-  // Step 7: Clear all existing auto-scheduled blocks
+  // Step 5: Estimate urgency from REAL capacity (available minutes before the
+  // deadline vs. remaining work) — this ranks tasks for placement order and
+  // decides which ones get force-front-loaded. This is only an estimate: the
+  // authoritative color is recomputed after placement in Step 8.
+  const rankedTasks = tasksToSchedule.map((t) => ({
+    ...t,
+    urgencyColor: estimateUrgency(t, now, availableSlots),
+  }));
+
+  // Step 6: Clear existing auto-scheduled blocks, but keep any block the
+  // user manually pinned (e.g. dragged to a fixed time) and any block that
+  // is happening right now — recalculating mid-block must not yank the task
+  // someone is working on. The rest of the remaining work is re-placed.
   updatedTasks = updatedTasks.map((t) => {
     if (t.autoSchedule && !t.completed) {
-      return { ...t, scheduledBlocks: [] };
+      return { ...t, scheduledBlocks: t.scheduledBlocks.filter((b) => isKept(b, now)) };
     }
     return t;
   });
 
-  // Step 8: Run the constraint-satisfaction placement algorithm
-  updatedTasks = placeTasksInSlots(
+  // Step 7: Run the constraint-satisfaction placement algorithm.
+  // Tasks are placed in dependency-respecting (topological) order — a task
+  // is only placed once every incomplete prerequisite has already been
+  // placed — with priority/urgency/due-date/duration as the tie-breaker
+  // among tasks that are simultaneously ready.
+  const { tasks: placedTasks, blockedIds } = scheduleWithDependencies(
     updatedTasks,
-    sortedTasks,
+    rankedTasks,
     availableSlots,
-    busySlots,
     settings,
     now,
     cutoffDate
   );
+  updatedTasks = placedTasks;
 
-  // Step 9: Recalculate urgency colors after placement
+  // Step 8: Recalculate authoritative urgency colors from the actual
+  // placement result (not just calendar-day heuristics).
   updatedTasks = updatedTasks.map((task) => ({
     ...task,
-    urgencyColor: computeUrgencyColor(task, now),
+    schedulingBlocked: blockedIds.has(task.id),
+    urgencyColor: computeFinalUrgencyColor(task, now, blockedIds.has(task.id), cutoffDate),
   }));
 
   return updatedTasks;
 }
 
 // ============================================================
-// URGENCY COLOR COMPUTATION
-// Green = normal, Orange = close to deadline, Red = overdue
+// SHARED HELPERS
 // ============================================================
 
-function computeUrgencyColor(task: Task, now: Date): UrgencyColor {
+/**
+ * The slot pool a task draws from. A task pointing at a profile that no
+ * longer exists (deleted, or synced from another device) falls back to the
+ * default day window instead of silently never being scheduled.
+ */
+function resolveProfileId(task: Task, pools: Map<string, TimeSlot[]>): string {
+  const id = task.schedulingHoursId || '_default';
+  return pools.has(id) ? id : '_default';
+}
+
+function isInProgress(block: ScheduledBlock, now: Date): boolean {
+  return !isAfter(parseISO(block.startTime), now) && isAfter(parseISO(block.endTime), now);
+}
+
+/** Blocks that survive a recalculation: user-pinned ones, and the one happening now. */
+function isKept(block: ScheduledBlock, now: Date): boolean {
+  return block.isManuallyPinned || isInProgress(block, now);
+}
+
+/**
+ * Kept blocks that still represent work to come. A pinned block whose time
+ * has already passed is history — if that work happened, progress records
+ * it — so it no longer counts toward the remaining work.
+ */
+function lockedBlocks(task: Task, now: Date): ScheduledBlock[] {
+  return task.scheduledBlocks.filter(
+    (b) => isKept(b, now) && isAfter(parseISO(b.endTime), now)
+  );
+}
+
+function isTemplate(task: Task): boolean {
+  return !!task.repeatingRule && !task.isRepeatingInstance;
+}
+
+// ============================================================
+// URGENCY ESTIMATION (pre-placement)
+// Used only to rank/order tasks before the solver runs. Compares the
+// remaining work against the actual free capacity available in the task's
+// scheduling-hours profile before its deadline.
+// ============================================================
+
+function estimateUrgency(
+  task: Task,
+  now: Date,
+  availableSlots: Map<string, TimeSlot[]>
+): UrgencyColor {
   if (task.completed || !task.dueDate) return UrgencyColor.Green;
 
   const dueDate = parseISO(task.dueDate);
-  const daysUntilDue = differenceInDays(dueDate, now);
-  const remainingDuration = task.duration - task.progress;
+  const pinnedMinutes = lockedBlocks(task, now).reduce((sum, b) => sum + b.duration, 0);
+  const remaining = task.duration - task.progress - pinnedMinutes;
+  if (remaining <= 0) return UrgencyColor.Green;
 
   // Already overdue
-  if (isBefore(dueDate, now)) {
+  if (isBefore(dueDate, now)) return UrgencyColor.Red;
+
+  // Capacity only counts from when the task is allowed to start.
+  const startAfter = task.startAfter ? parseISO(task.startAfter) : null;
+  const windowStart = startAfter && isAfter(startAfter, now) ? startAfter : now;
+  const slots = availableSlots.get(resolveProfileId(task, availableSlots)) || [];
+  const availableMinutes = sumAvailableMinutesBetween(slots, windowStart, dueDate);
+
+  // Not mathematically enough free capacity to finish in time
+  if (availableMinutes < remaining) return UrgencyColor.Red;
+
+  // Capacity is thin — very little slack before the deadline
+  if (availableMinutes < remaining * 1.25) return UrgencyColor.Orange;
+
+  // Fits comfortably on paper, but almost no runway left to absorb slippage
+  const daysUntilDue = differenceInDays(dueDate, now);
+  if (daysUntilDue <= 1 && remaining > 30) return UrgencyColor.Orange;
+
+  return UrgencyColor.Green;
+}
+
+function sumAvailableMinutesBetween(slots: TimeSlot[], from: Date, to: Date): number {
+  let total = 0;
+  for (const slot of slots) {
+    if (!isBefore(slot.start, to)) break; // slots are sorted ascending
+    const start = isAfter(slot.start, from) ? slot.start : from;
+    const end = isBefore(slot.end, to) ? slot.end : to;
+    if (isAfter(end, start)) total += differenceInMinutes(end, start);
+  }
+  return total;
+}
+
+// ============================================================
+// FINAL URGENCY (post-placement)
+// Green = fits comfortably, Orange = fits but tight, Red = overdue,
+// blocked, or mathematically cannot make the deadline.
+// ============================================================
+
+function computeFinalUrgencyColor(
+  task: Task,
+  now: Date,
+  isBlocked: boolean,
+  cutoff: Date
+): UrgencyColor {
+  // Completed tasks and repeating templates carry no urgency of their own.
+  if (task.completed || isTemplate(task)) return UrgencyColor.Green;
+
+  const remaining = task.duration - task.progress;
+  if (remaining <= 0) return UrgencyColor.Green;
+
+  // Can't even start — an unresolved prerequisite is blocking it.
+  // This applies even without a due date: the task is stuck regardless.
+  if (isBlocked) return UrgencyColor.Red;
+
+  if (!task.dueDate) return UrgencyColor.Green;
+  const dueDate = parseISO(task.dueDate);
+
+  // Already overdue
+  if (isBefore(dueDate, now)) return UrgencyColor.Red;
+
+  // Tasks the engine doesn't place (manual or still in the inbox) can only be
+  // judged by their date — "won't fit" would be meaningless for them.
+  if (!task.autoSchedule || task.inInbox) {
+    return differenceInMinutes(dueDate, now) <= 24 * 60 ? UrgencyColor.Orange : UrgencyColor.Green;
+  }
+
+  // Only blocks that haven't ended yet represent work still to come.
+  const liveBlocks = task.scheduledBlocks.filter((b) => isAfter(parseISO(b.endTime), now));
+  const totalScheduled = liveBlocks.reduce((sum, b) => sum + b.duration, 0);
+  if (totalScheduled < remaining) {
+    // A deadline past the planning horizon: the rest is simply not planned yet.
+    if (isAfter(dueDate, cutoff)) return UrgencyColor.Green;
+    // The engine couldn't find enough free capacity (the scheduling-hours
+    // profile is too sparse, or everything is taken by higher priorities).
     return UrgencyColor.Red;
   }
 
-  // Less than 1 day remaining and significant work left
-  if (daysUntilDue <= 1 && remainingDuration > 60) {
-    return UrgencyColor.Red;
-  }
+  const scheduledBeforeDue = liveBlocks.reduce((sum, b) => {
+    return isAfter(parseISO(b.endTime), dueDate) ? sum : sum + b.duration;
+  }, 0);
+  // Enough total capacity exists, but some of it landed after the deadline
+  if (scheduledBeforeDue < remaining) return UrgencyColor.Red;
 
-  // Within danger zone (remaining work barely fits)
-  // If remaining hours > available hours before deadline * 0.7
-  if (daysUntilDue <= 2 || (daysUntilDue <= 3 && remainingDuration > 120)) {
-    return UrgencyColor.Orange;
-  }
+  // Fully scheduled ahead of the deadline — check how much slack is left
+  const lastBlockEnd = liveBlocks.reduce((latest, b) => {
+    const end = parseISO(b.endTime);
+    return isAfter(end, latest) ? end : latest;
+  }, now);
+  const slackMinutes = differenceInMinutes(dueDate, lastBlockEnd);
+  if (slackMinutes < 120) return UrgencyColor.Orange;
+
+  const daysUntilDue = differenceInDays(dueDate, now);
+  if (daysUntilDue <= 1) return UrgencyColor.Orange;
 
   return UrgencyColor.Green;
 }
@@ -162,8 +292,11 @@ function handleAutoIgnore(tasks: Task[], now: Date): Task[] {
 }
 
 // ============================================================
-// PRIORITY SORTING
-// Priority > Due Date > Duration (shortest first for packing)
+// SCHEDULING COMPARATOR
+// Priority > Due Date > Duration (shortest first for packing).
+// Urgency (Red/Orange, derived from real capacity) supersedes all of it —
+// a task that is mathematically at risk of missing its deadline always
+// jumps the queue, even ahead of a High-priority task that has slack.
 // ============================================================
 
 const PRIORITY_WEIGHT: Record<Priority, number> = {
@@ -173,34 +306,31 @@ const PRIORITY_WEIGHT: Record<Priority, number> = {
   [Priority.None]: 1,
 };
 
-function sortBySchedulingPriority(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => {
-    // 1. Red urgency tasks first (forced front-loading)
-    const aIsRed = a.urgencyColor === UrgencyColor.Red ? 1 : 0;
-    const bIsRed = b.urgencyColor === UrgencyColor.Red ? 1 : 0;
-    if (aIsRed !== bIsRed) return bIsRed - aIsRed;
+function compareForScheduling(a: Task, b: Task): number {
+  // 1. Red urgency tasks first (forced front-loading)
+  const aIsRed = a.urgencyColor === UrgencyColor.Red ? 1 : 0;
+  const bIsRed = b.urgencyColor === UrgencyColor.Red ? 1 : 0;
+  if (aIsRed !== bIsRed) return bIsRed - aIsRed;
 
-    // 2. Orange urgency tasks next
-    const aIsOrange = a.urgencyColor === UrgencyColor.Orange ? 1 : 0;
-    const bIsOrange = b.urgencyColor === UrgencyColor.Orange ? 1 : 0;
-    if (aIsOrange !== bIsOrange) return bIsOrange - aIsOrange;
+  // 2. Orange urgency tasks next
+  const aIsOrange = a.urgencyColor === UrgencyColor.Orange ? 1 : 0;
+  const bIsOrange = b.urgencyColor === UrgencyColor.Orange ? 1 : 0;
+  if (aIsOrange !== bIsOrange) return bIsOrange - aIsOrange;
 
-    // 3. Priority (High > Medium > Low > None)
-    const priDiff = PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority];
-    if (priDiff !== 0) return priDiff;
+  // 3. Priority (High > Medium > Low > None)
+  const priDiff = PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority];
+  if (priDiff !== 0) return priDiff;
 
-    // 4. Due date (earlier deadline first)
-    if (a.dueDate && b.dueDate) {
-      const dueDiff =
-        parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime();
-      if (dueDiff !== 0) return dueDiff;
-    }
-    if (a.dueDate && !b.dueDate) return -1;
-    if (!a.dueDate && b.dueDate) return 1;
+  // 4. Due date (earlier deadline first)
+  if (a.dueDate && b.dueDate) {
+    const dueDiff = parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime();
+    if (dueDiff !== 0) return dueDiff;
+  }
+  if (a.dueDate && !b.dueDate) return -1;
+  if (!a.dueDate && b.dueDate) return 1;
 
-    // 5. Shorter tasks first (better packing)
-    return a.duration - a.progress - (b.duration - b.progress);
-  });
+  // 5. Shorter tasks first (better packing)
+  return a.duration - a.progress - (b.duration - b.progress);
 }
 
 // ============================================================
@@ -251,11 +381,14 @@ function buildBusyMap(
     }
   }
 
-  // Add manually pinned (non-auto-scheduled) tasks
+  // Add kept blocks — pinned ones (a block can be pinned even on a task that
+  // is otherwise auto-scheduled, e.g. one occurrence of a split task dragged
+  // to a fixed time) and blocks in progress right now. Everything else flows
+  // around them.
   for (const task of tasks) {
-    if (task.autoSchedule || task.completed || task.inInbox) continue;
+    if (task.completed || task.inInbox || isTemplate(task)) continue;
     for (const block of task.scheduledBlocks) {
-      if (block.isManuallyPinned) {
+      if (isKept(block, now)) {
         busy.push({
           start: parseISO(block.startTime),
           end: parseISO(block.endTime),
@@ -289,7 +422,10 @@ function buildAvailableSlots(
     slotsMap.set(profile.id, slots);
   }
 
-  // Also build a "default" / "any" profile that uses dayStartHour to dayEndHour
+  // Also build a "default" / "any time" profile spanning dayStartHour → dayEndHour.
+  // Clamp defensively: a corrupt setting must never produce NaN dates.
+  const startHour = clampHour(settings.dayStartHour, 6, 0, 23);
+  const endHour = Math.max(startHour + 1, clampHour(settings.dayEndHour, 22, 1, 24));
   const defaultProfile: SchedulingHoursProfile = {
     id: '_default',
     name: 'Default',
@@ -301,8 +437,8 @@ function buildAvailableSlots(
           enabled: true,
           blocks: [
             {
-              start: `${String(settings.dayStartHour).padStart(2, '0')}:00`,
-              end: `${String(settings.dayEndHour).padStart(2, '0')}:00`,
+              start: `${String(startHour).padStart(2, '0')}:00`,
+              end: `${String(endHour).padStart(2, '0')}:00`,
             },
           ],
         },
@@ -319,6 +455,22 @@ function buildAvailableSlots(
   slotsMap.set('_default', defaultSlots);
 
   return slotsMap;
+}
+
+function clampHour(value: number, fallback: number, min: number, max: number): number {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** "HH:mm" → [hours, minutes], or null when the value is empty/malformed. */
+function parseClock(value: string | undefined): [number, number] | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value ?? '');
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 24 || m > 59 || (h === 24 && m > 0)) return null;
+  return [h, m];
 }
 
 function computeProfileSlots(
@@ -338,12 +490,17 @@ function computeProfileSlots(
 
     // Check for date override first
     const daySchedule =
-      profile.dateOverrides[dateStr] || profile.weeklySchedule[dayOfWeek];
+      profile.dateOverrides?.[dateStr] || profile.weeklySchedule?.[dayOfWeek];
 
     if (daySchedule && daySchedule.enabled) {
-      for (const block of daySchedule.blocks) {
-        const [startH, startM] = block.start.split(':').map(Number);
-        const [endH, endM] = block.end.split(':').map(Number);
+      for (const block of daySchedule.blocks ?? []) {
+        // A half-edited time input can leave "" behind — skip it rather than
+        // letting NaN dates poison every slot computation after it.
+        const startClock = parseClock(block.start);
+        const endClock = parseClock(block.end);
+        if (!startClock || !endClock) continue;
+        const [startH, startM] = startClock;
+        const [endH, endM] = endClock;
 
         let blockStart = new Date(current);
         blockStart.setHours(startH, startM, 0, 0);
@@ -442,19 +599,54 @@ function subtractBusy(
 }
 
 // ============================================================
-// TASK PLACEMENT: Constraint-satisfaction algorithm
+// DEPENDENCY-AWARE SCHEDULING DRIVER
+// Places tasks in topological order with respect to dependsOn — a task is
+// only handed to the placement algorithm once every incomplete prerequisite
+// has already been placed. Among tasks that are simultaneously "ready"
+// (no unresolved prerequisite), compareForScheduling breaks the tie.
 // ============================================================
 
-function placeTasksInSlots(
+function scheduleWithDependencies(
   allTasks: Task[],
   tasksToPlace: Task[],
   availableSlots: Map<string, TimeSlot[]>,
-  busySlots: BusySlot[],
   settings: AppSettings,
   now: Date,
   cutoff: Date
-): Task[] {
-  // Clone available slots for consumption
+): { tasks: Task[]; blockedIds: Set<string> } {
+  const taskById = new Map(allTasks.map((t) => [t.id, t]));
+  const rankedById = new Map(tasksToPlace.map((t) => [t.id, t]));
+  const placeableIds = new Set(tasksToPlace.map((t) => t.id));
+
+  const blockedIds = new Set<string>();
+  // Unresolved (incomplete) dependency ids, per task-to-place
+  const remainingDeps = new Map<string, Set<string>>();
+  // Reverse edges: depId -> ids of tasks waiting on it
+  const dependents = new Map<string, string[]>();
+
+  for (const t of tasksToPlace) {
+    const deps = new Set<string>();
+    for (const depId of t.dependsOn) {
+      const dep = taskById.get(depId);
+      if (!dep || dep.completed) continue; // already satisfied / not a real dep
+
+      if (!placeableIds.has(depId)) {
+        // The prerequisite won't be placed by the engine this run. If the
+        // user pinned it to a time (a manual task), its end is a known start
+        // point for this one. Otherwise (inbox, missed, unscheduled manual
+        // task) there's no start time to wait for, so this task is blocked.
+        if (lockedBlocks(dep, now).length === 0) blockedIds.add(t.id);
+        continue;
+      }
+
+      deps.add(depId);
+      if (!dependents.has(depId)) dependents.set(depId, []);
+      dependents.get(depId)!.push(t.id);
+    }
+    remainingDeps.set(t.id, deps);
+  }
+
+  // Clone slot pools for consumption during placement
   const consumableSlots = new Map<string, TimeSlot[]>();
   availableSlots.forEach((slots, key) => {
     consumableSlots.set(
@@ -462,232 +654,291 @@ function placeTasksInSlots(
       slots.map((s) => ({ ...s, start: new Date(s.start), end: new Date(s.end) }))
     );
   });
-
-  // Track placed blocks
-  const placedBlocksMap = new Map<string, ScheduledBlock[]>();
-
-  // (balanced daily target is now computed per-task based on its deadline window)
-
-  // Track daily placement for balanced mode (per-task per-day)
   const dailyPlaced = new Map<string, number>();
+  const placedBlocksMap = new Map<string, ScheduledBlock[]>();
+  const processed = new Set<string>();
 
-  for (const task of tasksToPlace) {
-    const remainingDuration = task.duration - task.progress;
-    if (remainingDuration <= 0) continue;
+  // Tasks with zero unresolved dependencies are immediately ready
+  let ready: Task[] = tasksToPlace.filter(
+    (t) => !blockedIds.has(t.id) && remainingDeps.get(t.id)!.size === 0
+  );
 
-    // Resolve dependencies: find the earliest start
+  while (ready.length > 0) {
+    // Pull the highest-ranked ready task (O(n) scan instead of a full re-sort)
+    let bestIdx = 0;
+    for (let i = 1; i < ready.length; i++) {
+      if (compareForScheduling(ready[i], ready[bestIdx]) < 0) bestIdx = i;
+    }
+    const task = ready.splice(bestIdx, 1)[0];
+    processed.add(task.id);
+
+    // Resolve the earliest this task may start
     let effectiveStart = now;
     if (task.startAfter) {
       const startAfter = parseISO(task.startAfter);
-      if (isAfter(startAfter, effectiveStart)) {
-        effectiveStart = startAfter;
-      }
+      if (isAfter(startAfter, effectiveStart)) effectiveStart = startAfter;
     }
-
-    // Check dependency chain
-    let hasUnscheduledDep = false;
     for (const depId of task.dependsOn) {
-      const depTask = allTasks.find((t) => t.id === depId);
-      if (depTask && !depTask.completed) {
-        // Dependency not complete — push start after its latest scheduled block
-        const depBlocks = placedBlocksMap.get(depId) || depTask.scheduledBlocks;
-        if (depBlocks.length > 0) {
-          const latestEnd = depBlocks.reduce((latest, b) => {
-            const end = parseISO(b.endTime);
-            return isAfter(end, latest) ? end : latest;
-          }, now);
-          if (isAfter(latestEnd, effectiveStart)) {
-            effectiveStart = latestEnd;
-          }
-        } else {
-          // Dependency has no scheduled blocks and isn't complete — can't schedule dependent
-          hasUnscheduledDep = true;
-        }
-      }
-    }
-
-    // Skip scheduling if any dependency is incomplete and unscheduled
-    if (hasUnscheduledDep) {
-      placedBlocksMap.set(task.id, []);
-      continue;
-    }
-
-    // Get the correct slot pool — ONLY use the assigned profile (no fallback)
-    // If a user chose "Study Hours", tasks MUST schedule within those hours, not random daytime
-    const profileId = task.schedulingHoursId || '_default';
-    const slots = consumableSlots.get(profileId) || [];
-
-    // Place the task
-    const blocks: ScheduledBlock[] = [];
-    let remainingToPlace = remainingDuration;
-
-    // For red/orange tasks, bypass balanced distribution — front-load aggressively
-    const forceFrontLoad =
-      task.urgencyColor === UrgencyColor.Red ||
-      task.urgencyColor === UrgencyColor.Orange;
-
-    const isBalanced =
-      settings.distributionModel === DistributionModel.Balanced &&
-      !forceFrontLoad;
-
-    // Safety cap: prevent runaway loops (max iterations = 2× slot count)
-    const maxIterations = slots.length * 2 + 100;
-    let iterations = 0;
-
-    for (let i = 0; i < slots.length && remainingToPlace > 0; i++) {
-      if (++iterations > maxIterations) break; // safety valve
-      const slot = slots[i];
-
-      // Skip slots before effective start
-      if (isBefore(slot.end, effectiveStart)) continue;
-
-      // Skip slots beyond cutoff
-      if (isAfter(slot.start, cutoff)) break;
-
-      // Skip slots past due date if exists (but allow overdue tasks to still be scheduled)
-      if (task.dueDate && task.urgencyColor !== UrgencyColor.Red &&
-          isAfter(slot.start, parseISO(task.dueDate))) break;
-
-      // Adjust slot start if it begins before effective start
-      const slotStart = isAfter(slot.start, effectiveStart)
-        ? slot.start
-        : effectiveStart;
-      const slotDuration = differenceInMinutes(slot.end, slotStart);
-
-      if (slotDuration < 5) continue;
-
-      // Balanced distribution: check daily limit for this task
-      if (isBalanced) {
-        const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
-        const dayPlaced = dailyPlaced.get(dayKey) || 0;
-        const horizonEnd = task.dueDate ? parseISO(task.dueDate) : cutoff;
-        const taskHorizon = Math.max(1, differenceInDays(horizonEnd, slotStart));
-        const perTaskDailyTarget = Math.ceil(remainingToPlace / taskHorizon);
-        // Use per-task target but cap at a global per-task max per day
-        if (dayPlaced >= perTaskDailyTarget * 1.3) continue;
-      }
-
-      // For splittable tasks, use min block constraint
-      if (task.splittable) {
-        if (slotDuration < task.minBlockDuration && slotDuration < remainingToPlace) {
-          continue; // Skip slots smaller than min block (unless it's the last bit)
-        }
-
-        // Compute max block size:
-        // - Balanced mode: spread across days proportionally
-        // - Front-load mode: cap at minBlockDuration to still respect splitting
-        const horizonDays = Math.max(1, differenceInDays(
-          task.dueDate ? parseISO(task.dueDate) : cutoff,
-          slotStart
-        ));
-        const spreadTarget = Math.max(
-          task.minBlockDuration,
-          Math.ceil(remainingToPlace / horizonDays)
-        );
-        const maxPerSlot = isBalanced
-          ? spreadTarget
-          : Math.max(task.minBlockDuration, Math.min(spreadTarget, task.minBlockDuration * 2));
-
-        const blockDuration = Math.min(
-          remainingToPlace,
-          slotDuration,
-          maxPerSlot
-        );
-
-        if (blockDuration >= Math.min(task.minBlockDuration, remainingToPlace)) {
-          const block: ScheduledBlock = {
-            id: uuidv4(),
-            taskId: task.id,
-            startTime: toLocalISO(slotStart),
-            endTime: toLocalISO(addMinutes(slotStart, blockDuration)),
-            duration: blockDuration,
-            isManuallyPinned: false,
-          };
-          blocks.push(block);
-          remainingToPlace -= blockDuration;
-
-          // Update daily tracking
-          const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
-          dailyPlaced.set(dayKey, (dailyPlaced.get(dayKey) || 0) + blockDuration);
-
-          // Consume the used portion from this profile's slots
-          const blockStart = slotStart;
-          const blockEnd = addMinutes(slotStart, blockDuration);
-          consumeSlot(slots, i, blockStart, blockEnd);
-
-          // Also consume from ALL other profiles to prevent cross-profile double-booking
-          // Use non-strict (<=, >=) so boundary-touching fragments are skipped
-          const bsMs = blockStart.getTime();
-          const beMs = blockEnd.getTime();
-          consumableSlots.forEach((otherSlots, key) => {
-            if (key === profileId) return;
-            for (let j = 0; j < otherSlots.length; j++) {
-              if (otherSlots[j].end.getTime() <= bsMs || otherSlots[j].start.getTime() >= beMs) continue;
-              consumeSlot(otherSlots, j, blockStart, blockEnd);
-              j--; // re-check after splice
-            }
-          });
-
-          // Decrement so loop's i++ revisits this index — the after-fragment
-          // (remaining available time in this window) now sits here
-          i--;
-        }
+      const dep = taskById.get(depId);
+      if (!dep || dep.completed) continue;
+      // Engine-placed prerequisites were placed earlier this run; manual ones
+      // keep the blocks the user pinned.
+      const depBlocks = placedBlocksMap.get(depId) ?? lockedBlocks(dep, now);
+      if (depBlocks.length > 0) {
+        const latestEnd = depBlocks.reduce((latest, b) => {
+          const end = parseISO(b.endTime);
+          return isAfter(end, latest) ? end : latest;
+        }, now);
+        if (isAfter(latestEnd, effectiveStart)) effectiveStart = latestEnd;
       } else {
-        // Non-splittable: need a contiguous block
-        if (slotDuration >= remainingToPlace) {
-          const block: ScheduledBlock = {
-            id: uuidv4(),
-            taskId: task.id,
-            startTime: toLocalISO(slotStart),
-            endTime: toLocalISO(addMinutes(slotStart, remainingToPlace)),
-            duration: remainingToPlace,
-            isManuallyPinned: false,
-          };
-          blocks.push(block);
-
-          // Update daily tracking
-          const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
-          dailyPlaced.set(
-            dayKey,
-            (dailyPlaced.get(dayKey) || 0) + remainingToPlace
-          );
-
-          // Consume the used portion from this profile's slots
-          const nsBlockStart = slotStart;
-          const nsBlockEnd = addMinutes(slotStart, remainingToPlace);
-          consumeSlot(slots, i, nsBlockStart, nsBlockEnd);
-
-          // Also consume from ALL other profiles to prevent cross-profile double-booking
-          const nsBsMs = nsBlockStart.getTime();
-          const nsBeMs = nsBlockEnd.getTime();
-          consumableSlots.forEach((otherSlots, key) => {
-            if (key === profileId) return;
-            for (let j = 0; j < otherSlots.length; j++) {
-              if (otherSlots[j].end.getTime() <= nsBsMs || otherSlots[j].start.getTime() >= nsBeMs) continue;
-              consumeSlot(otherSlots, j, nsBlockStart, nsBlockEnd);
-              j--;
-            }
-          });
-
-          // Non-splittable is done after one placement, no need to revisit
-          i--;
-
-          remainingToPlace = 0;
-        }
+        // Dependency was schedulable in principle but the solver found no
+        // capacity for it (e.g. it ran into the cutoff) — this task has no
+        // known start time this run.
+        blockedIds.add(task.id);
       }
     }
 
-    placedBlocksMap.set(task.id, blocks);
+    if (blockedIds.has(task.id)) {
+      placedBlocksMap.set(task.id, []);
+    } else {
+      const blocks = placeOneTask(task, consumableSlots, dailyPlaced, settings, effectiveStart, cutoff, now);
+      placedBlocksMap.set(task.id, blocks);
+    }
+
+    // This task is resolved — release any dependents whose last prerequisite
+    // was this one
+    for (const dependentId of dependents.get(task.id) || []) {
+      const deps = remainingDeps.get(dependentId)!;
+      deps.delete(task.id);
+      if (deps.size === 0 && !processed.has(dependentId) && !blockedIds.has(dependentId)) {
+        const dependentTask = rankedById.get(dependentId);
+        if (dependentTask) ready.push(dependentTask);
+      }
+    }
   }
 
-  // Apply placed blocks back to tasks
-  return allTasks.map((task) => {
-    const blocks = placedBlocksMap.get(task.id);
-    if (blocks) {
-      return { ...task, scheduledBlocks: blocks };
+  // Anything left unprocessed has a circular dependency (should be prevented
+  // at the UI layer, but guard against stale/imported data) — block it.
+  for (const t of tasksToPlace) {
+    if (!processed.has(t.id)) {
+      blockedIds.add(t.id);
+      placedBlocksMap.set(t.id, []);
     }
-    return task;
+  }
+
+  const resultTasks = allTasks.map((t) => {
+    const blocks = placedBlocksMap.get(t.id);
+    if (blocks !== undefined) {
+      return { ...t, scheduledBlocks: blocks };
+    }
+    return t;
   });
+
+  return { tasks: resultTasks, blockedIds };
+}
+
+// ============================================================
+// SINGLE-TASK PLACEMENT: Constraint-satisfaction slot filling
+// ============================================================
+
+function placeOneTask(
+  task: Task,
+  consumableSlots: Map<string, TimeSlot[]>,
+  dailyPlaced: Map<string, number>,
+  settings: AppSettings,
+  effectiveStart: Date,
+  cutoff: Date,
+  now: Date
+): ScheduledBlock[] {
+  // Pinned blocks (dragged to a fixed time) and the block in progress right
+  // now are kept as-is; only the rest of the remaining work needs a slot.
+  // (Their time is already excluded from consumableSlots via the busy map.)
+  // Past pinned blocks stay for the calendar's history but no longer count.
+  const pinnedBlocks = task.scheduledBlocks.filter((b) => isKept(b, now));
+  const livePinned = lockedBlocks(task, now);
+  const pinnedMinutes = livePinned.reduce((sum, b) => sum + b.duration, 0);
+  for (const b of livePinned) {
+    const dayKey = `${task.id}-${format(parseISO(b.startTime), 'yyyy-MM-dd')}`;
+    dailyPlaced.set(dayKey, (dailyPlaced.get(dayKey) || 0) + b.duration);
+  }
+
+  const remainingDuration = task.duration - task.progress - pinnedMinutes;
+  if (remainingDuration <= 0) return pinnedBlocks;
+
+  // Use ONLY the task's own scheduling-hours profile — if a user chose
+  // "Study Hours", work must land inside those hours, never random daytime.
+  // (A profile that no longer exists falls back to the default window.)
+  const profileId = resolveProfileId(task, consumableSlots);
+  const slots = consumableSlots.get(profileId) || [];
+
+  const blocks: ScheduledBlock[] = [...pinnedBlocks];
+  let remainingToPlace = remainingDuration;
+  // Old or synced data may lack a sane value; 5 min is the smallest block the UI allows.
+  const minBlock = Math.max(5, Number(task.minBlockDuration) || 30);
+
+  // For red/orange tasks, bypass balanced distribution — front-load aggressively
+  const forceFrontLoad =
+    task.urgencyColor === UrgencyColor.Red || task.urgencyColor === UrgencyColor.Orange;
+
+  const isBalanced =
+    settings.distributionModel === DistributionModel.Balanced && !forceFrontLoad;
+
+  // Safety cap: prevent runaway loops (max iterations = 2× slot count)
+  const maxIterations = slots.length * 2 + 100;
+  let iterations = 0;
+
+  for (let i = 0; i < slots.length && remainingToPlace > 0; i++) {
+    if (++iterations > maxIterations) break; // safety valve
+    const slot = slots[i];
+
+    // Skip slots before effective start
+    if (isBefore(slot.end, effectiveStart)) continue;
+
+    // Skip slots beyond cutoff
+    if (isAfter(slot.start, cutoff)) break;
+
+    // Skip slots past due date if exists (but allow overdue/at-risk tasks to
+    // still be scheduled past it — better late than never)
+    if (
+      task.dueDate &&
+      task.urgencyColor !== UrgencyColor.Red &&
+      isAfter(slot.start, parseISO(task.dueDate))
+    )
+      break;
+
+    // Adjust slot start if it begins before effective start
+    const slotStart = isAfter(slot.start, effectiveStart) ? slot.start : effectiveStart;
+    const slotDuration = differenceInMinutes(slot.end, slotStart);
+
+    if (slotDuration < 5) continue;
+
+    // Balanced distribution: check daily limit for this task
+    if (isBalanced) {
+      const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
+      const dayPlaced = dailyPlaced.get(dayKey) || 0;
+      const horizonEnd = task.dueDate ? parseISO(task.dueDate) : cutoff;
+      const taskHorizon = Math.max(1, differenceInDays(horizonEnd, slotStart));
+      const perTaskDailyTarget = Math.ceil(remainingToPlace / taskHorizon);
+      // Use per-task target but cap at a global per-task max per day
+      if (dayPlaced >= perTaskDailyTarget * 1.3) continue;
+    }
+
+    // For splittable tasks, use min block constraint
+    if (task.splittable) {
+      if (slotDuration < minBlock && slotDuration < remainingToPlace) {
+        continue; // Skip slots smaller than min block (unless it's the last bit)
+      }
+
+      // Compute max block size:
+      // - Balanced mode: spread across days proportionally
+      // - Front-load mode: cap at minBlockDuration to still respect splitting
+      const horizonDays = Math.max(
+        1,
+        differenceInDays(task.dueDate ? parseISO(task.dueDate) : cutoff, slotStart)
+      );
+      const spreadTarget = Math.max(
+        minBlock,
+        Math.ceil(remainingToPlace / horizonDays)
+      );
+      const maxPerSlot = isBalanced
+        ? spreadTarget
+        : Math.max(minBlock, Math.min(spreadTarget, minBlock * 2));
+
+      let blockDuration = Math.min(remainingToPlace, slotDuration, maxPerSlot);
+
+      // Never leave a leftover shorter than the minimum block — it would
+      // become exactly the kind of useless fragment minBlockDuration exists
+      // to prevent. Absorb it into this block if the slot allows, otherwise
+      // shrink this block so the leftover is a full minimum block.
+      const leftover = remainingToPlace - blockDuration;
+      if (leftover > 0 && leftover < minBlock) {
+        blockDuration =
+          remainingToPlace <= slotDuration
+            ? remainingToPlace
+            : remainingToPlace - minBlock;
+      }
+
+      if (blockDuration > 0 && blockDuration >= Math.min(minBlock, remainingToPlace)) {
+        const block: ScheduledBlock = {
+          id: uuidv4(),
+          taskId: task.id,
+          startTime: toLocalISO(slotStart),
+          endTime: toLocalISO(addMinutes(slotStart, blockDuration)),
+          duration: blockDuration,
+          isManuallyPinned: false,
+        };
+        blocks.push(block);
+        remainingToPlace -= blockDuration;
+
+        // Update daily tracking
+        const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
+        dailyPlaced.set(dayKey, (dailyPlaced.get(dayKey) || 0) + blockDuration);
+
+        // Consume the used portion from this profile's slots
+        const blockStart = slotStart;
+        const blockEnd = addMinutes(slotStart, blockDuration);
+        consumeSlot(slots, i, blockStart, blockEnd);
+
+        // Also consume from ALL other profiles to prevent cross-profile double-booking
+        // Use non-strict (<=, >=) so boundary-touching fragments are skipped
+        const bsMs = blockStart.getTime();
+        const beMs = blockEnd.getTime();
+        consumableSlots.forEach((otherSlots, key) => {
+          if (key === profileId) return;
+          for (let j = 0; j < otherSlots.length; j++) {
+            if (otherSlots[j].end.getTime() <= bsMs || otherSlots[j].start.getTime() >= beMs) continue;
+            consumeSlot(otherSlots, j, blockStart, blockEnd);
+            j--; // re-check after splice
+          }
+        });
+
+        // Decrement so loop's i++ revisits this index — the after-fragment
+        // (remaining available time in this window) now sits here
+        i--;
+      }
+    } else {
+      // Non-splittable: need a contiguous block
+      if (slotDuration >= remainingToPlace) {
+        const block: ScheduledBlock = {
+          id: uuidv4(),
+          taskId: task.id,
+          startTime: toLocalISO(slotStart),
+          endTime: toLocalISO(addMinutes(slotStart, remainingToPlace)),
+          duration: remainingToPlace,
+          isManuallyPinned: false,
+        };
+        blocks.push(block);
+
+        // Update daily tracking
+        const dayKey = `${task.id}-${format(slotStart, 'yyyy-MM-dd')}`;
+        dailyPlaced.set(dayKey, (dailyPlaced.get(dayKey) || 0) + remainingToPlace);
+
+        // Consume the used portion from this profile's slots
+        const nsBlockStart = slotStart;
+        const nsBlockEnd = addMinutes(slotStart, remainingToPlace);
+        consumeSlot(slots, i, nsBlockStart, nsBlockEnd);
+
+        // Also consume from ALL other profiles to prevent cross-profile double-booking
+        const nsBsMs = nsBlockStart.getTime();
+        const nsBeMs = nsBlockEnd.getTime();
+        consumableSlots.forEach((otherSlots, key) => {
+          if (key === profileId) return;
+          for (let j = 0; j < otherSlots.length; j++) {
+            if (otherSlots[j].end.getTime() <= nsBsMs || otherSlots[j].start.getTime() >= nsBeMs) continue;
+            consumeSlot(otherSlots, j, nsBlockStart, nsBlockEnd);
+            j--;
+          }
+        });
+
+        // Non-splittable is done after one placement, no need to revisit
+        i--;
+
+        remainingToPlace = 0;
+      }
+    }
+  }
+
+  return blocks;
 }
 
 // ============================================================

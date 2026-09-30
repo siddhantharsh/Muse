@@ -42,6 +42,9 @@
 
   /* Button primary text */
   --btn-primary-text: #2E3440;
+
+  /* Secondary text — readable on every surface (≥ 5:1 on nord1) */
+  --muse-text-dim: #AEB7C7;
 }
 
 [data-theme="light"] {
@@ -78,6 +81,23 @@
 
   /* Button primary text */
   --btn-primary-text: #ECEFF4;
+
+  /* Secondary text — readable on every surface (≥ 4.5:1 on nord1) */
+  --muse-text-dim: #5C667A;
+}
+
+/* nord3 (#4C566A) is Nord's border/comment color. Used as text it sits at
+   ~1.6:1 on nord1 — unreadable — so wherever it's applied to text, lift it
+   to the readable secondary tone. Borders keep the original nord3. */
+.text-nord3 {
+  color: var(--muse-text-dim);
+}
+.placeholder\:text-nord3::placeholder {
+  color: var(--muse-text-dim);
+  opacity: 0.75;
+}
+.hover\:text-nord3:hover {
+  color: var(--muse-text-dim);
 }
 
 * {
@@ -312,7 +332,8 @@ html, body, #root {
   font-family: 'JetBrains Mono', monospace;
 }
 .input-base::placeholder {
-  color: var(--muse-text-muted);
+  color: var(--muse-text-dim);
+  opacity: 0.7;
 }
 .input-base:focus {
   outline: none;

@@ -3,7 +3,7 @@
 // ============================================================
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pin } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
 import {
   format,
@@ -11,18 +11,81 @@ import {
   addDays,
   addWeeks,
   addMinutes,
-  isSameDay,
   isToday,
   isAfter,
+  isBefore,
   parseISO,
   differenceInMinutes,
   setHours,
   getISOWeek,
+  startOfDay,
 } from 'date-fns';
 import { ViewMode, CalendarEvent, Task, ScheduledBlock, UrgencyColor } from '../types';
+import { toLocalISO } from '../utils/dateUtils';
+import { getRootScale } from '../utils/viewport';
+import { isRepeatingTemplate } from '../utils/taskSelectors';
 
 const HOUR_HEIGHT = 64;
 const MIN_BLOCK_HEIGHT = 18;
+const SNAP_MINUTES = 15;
+
+/** One item's visible part within a single day column. */
+interface Segment {
+  key: string;
+  kind: 'event' | 'task';
+  start: Date; // clamped to the column's day
+  end: Date;
+  event?: CalendarEvent;
+  task?: Task;
+  block?: ScheduledBlock;
+  lane: number;
+  lanes: number;
+}
+
+/** Clips [start, end) to the given day; null when they don't intersect. */
+function clipToDay(start: Date, end: Date, day: Date): { start: Date; end: Date } | null {
+  const dayStart = startOfDay(day);
+  const dayEnd = addDays(dayStart, 1);
+  if (!isBefore(start, dayEnd) || !isAfter(end, dayStart)) return null;
+  return {
+    start: isAfter(start, dayStart) ? start : dayStart,
+    end: isBefore(end, dayEnd) ? end : dayEnd,
+  };
+}
+
+/** Side-by-side lanes for overlapping items (classic calendar layout). */
+function assignLanes(segments: Segment[]): Segment[] {
+  const sorted = [...segments].sort(
+    (a, b) => a.start.getTime() - b.start.getTime() || b.end.getTime() - a.end.getTime()
+  );
+  const result: Segment[] = [];
+  let cluster: Segment[] = [];
+  let laneEnds: number[] = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    const lanes = Math.max(1, laneEnds.length);
+    for (const s of cluster) result.push({ ...s, lanes });
+    cluster = [];
+    laneEnds = [];
+  };
+
+  for (const seg of sorted) {
+    const start = seg.start.getTime();
+    if (start >= clusterEnd && cluster.length > 0) flush();
+    let lane = laneEnds.findIndex((end) => end <= start);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(seg.end.getTime());
+    } else {
+      laneEnds[lane] = seg.end.getTime();
+    }
+    cluster.push({ ...seg, lane });
+    clusterEnd = Math.max(clusterEnd === -Infinity ? 0 : clusterEnd, seg.end.getTime());
+  }
+  if (cluster.length > 0) flush();
+  return result;
+}
 
 export function CalendarView() {
   const {
@@ -47,14 +110,6 @@ export function CalendarView() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      const now = new Date();
-      const scrollTo = (now.getHours() - 1) * HOUR_HEIGHT;
-      scrollRef.current.scrollTop = Math.max(0, scrollTo);
-    }
-  }, []);
-
   const selectedDate = parseISO(ui.selectedDate);
 
   const columns = useMemo(() => {
@@ -65,61 +120,105 @@ export function CalendarView() {
         return Array.from({ length: 3 }, (_, i) => addDays(selectedDate, i - 1));
       case ViewMode.Week:
       default: {
-        const weekStart = startOfWeek(selectedDate, {
-          weekStartsOn: settings.weekStartsOn,
-        });
+        const weekStart = startOfWeek(selectedDate, { weekStartsOn: settings.weekStartsOn });
         return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ui.selectedDate, ui.viewMode, settings.weekStartsOn]);
-
-  const hours = useMemo(() => {
-    const slots: number[] = [];
-    for (let h = settings.dayStartHour; h <= settings.dayEndHour; h++) {
-      slots.push(h);
-    }
-    return slots;
-  }, [settings.dayStartHour, settings.dayEndHour]);
 
   // Filter tasks by selected list
   const filteredTasks = useMemo(() => {
-    if (ui.selectedListId) {
-      return tasks.filter((t) => t.listId === ui.selectedListId);
-    }
+    if (ui.selectedListId) return tasks.filter((t) => t.listId === ui.selectedListId);
     return tasks;
   }, [tasks, ui.selectedListId]);
 
-  const navigateBack = () => {
-    const offset = ui.viewMode === ViewMode.Week ? -7 : ui.viewMode === ViewMode.ThreeDay ? -3 : -1;
-    setSelectedDate(format(addDays(selectedDate, offset), 'yyyy-MM-dd'));
-  };
+  // Timed segments per visible column (events + task blocks), with lanes.
+  const segmentsByColumn = useMemo(() => {
+    return columns.map((date) => {
+      const segs: Segment[] = [];
+      for (const event of events) {
+        if (event.allDay) continue;
+        const clip = clipToDay(parseISO(event.startTime), parseISO(event.endTime), date);
+        if (clip) segs.push({ key: `e-${event.id}`, kind: 'event', ...clip, event, lane: 0, lanes: 1 });
+      }
+      for (const task of filteredTasks) {
+        if (task.completed || isRepeatingTemplate(task)) continue;
+        for (const block of task.scheduledBlocks) {
+          const clip = clipToDay(parseISO(block.startTime), parseISO(block.endTime), date);
+          if (clip) segs.push({ key: `t-${block.id}`, kind: 'task', ...clip, task, block, lane: 0, lanes: 1 });
+        }
+      }
+      return assignLanes(segs);
+    });
+  }, [columns, events, filteredTasks]);
 
-  const navigateForward = () => {
-    const offset = ui.viewMode === ViewMode.Week ? 7 : ui.viewMode === ViewMode.ThreeDay ? 3 : 1;
-    setSelectedDate(format(addDays(selectedDate, offset), 'yyyy-MM-dd'));
+  // Visible hours: the configured day, widened to include anything scheduled
+  // outside it (e.g. a 05:00 "Deep work" profile) so nothing is ever hidden.
+  const { viewStartHour, viewEndHour } = useMemo(() => {
+    let start = settings.dayStartHour;
+    let end = settings.dayEndHour;
+    columns.forEach((date, i) => {
+      const dayStart = startOfDay(date);
+      for (const seg of segmentsByColumn[i]) {
+        start = Math.min(start, Math.floor(differenceInMinutes(seg.start, dayStart) / 60));
+        end = Math.max(end, Math.ceil(differenceInMinutes(seg.end, dayStart) / 60));
+      }
+    });
+    return { viewStartHour: Math.max(0, start), viewEndHour: Math.min(24, Math.max(end, start + 1)) };
+  }, [columns, segmentsByColumn, settings.dayStartHour, settings.dayEndHour]);
+
+  const hours = useMemo(
+    () => Array.from({ length: viewEndHour - viewStartHour }, (_, i) => viewStartHour + i),
+    [viewStartHour, viewEndHour]
+  );
+
+  /**
+   * Where to scroll: an hour before now while the day is running; once the
+   * visible day is over (late evening), the top — tomorrow morning is what
+   * matters next, not an empty evening.
+   */
+  const initialScrollTop = useCallback(() => {
+    const hour = new Date().getHours();
+    if (hour < viewStartHour || hour >= viewEndHour - 1) return 0;
+    return Math.max(0, (hour - 1 - viewStartHour) * HOUR_HEIGHT);
+  }, [viewStartHour, viewEndHour]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = initialScrollTop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const navigate = (direction: 1 | -1) => {
+    const step = ui.viewMode === ViewMode.Week ? 7 : ui.viewMode === ViewMode.ThreeDay ? 3 : 1;
+    setSelectedDate(format(addDays(selectedDate, step * direction), 'yyyy-MM-dd'));
   };
 
   const goToToday = () => {
     setSelectedDate(format(new Date(), 'yyyy-MM-dd'));
-    if (scrollRef.current) {
-      const now = new Date();
-      const scrollTo = (now.getHours() - 1) * HOUR_HEIGHT;
-      scrollRef.current.scrollTo({ top: Math.max(0, scrollTo), behavior: 'smooth' });
-    }
+    scrollRef.current?.scrollTo({ top: initialScrollTop(), behavior: 'smooth' });
   };
 
-  const handleTimeSlotClick = (date: Date, hour: number, e: React.MouseEvent) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const yOffset = e.clientY - rect.top;
-    const minuteOffset = Math.floor((yOffset / HOUR_HEIGHT) * 60);
-    const roundedMinutes = Math.round(minuteOffset / 15) * 15;
+  /** Pointer position within a column → snapped wall-clock time on that day. */
+  const timeAtPointer = useCallback(
+    (date: Date, columnEl: HTMLElement, clientY: number, grabOffsetScreenPx = 0) => {
+      const scale = getRootScale();
+      const rect = columnEl.getBoundingClientRect();
+      const y = (clientY - rect.top - grabOffsetScreenPx) / scale;
+      const minutes = Math.max(0, y / HOUR_HEIGHT) * 60 + viewStartHour * 60;
+      const snapped = Math.min(24 * 60 - SNAP_MINUTES, Math.round(minutes / SNAP_MINUTES) * SNAP_MINUTES);
+      const time = startOfDay(date);
+      time.setMinutes(snapped);
+      return time;
+    },
+    [viewStartHour]
+  );
 
-    const startTime = new Date(date);
-    startTime.setHours(hour, roundedMinutes, 0, 0);
+  const handleColumnDoubleClick = (date: Date, e: React.MouseEvent) => {
+    // Ignore double-clicks that land on an existing block.
+    if ((e.target as HTMLElement).closest('[data-block]')) return;
+    const startTime = timeAtPointer(date, e.currentTarget as HTMLElement, e.clientY);
     const endTime = addMinutes(startTime, settings.defaultTaskDuration);
-
-    // Use local ISO format (no timezone shift)
-    const toLocalISO = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm:ss");
 
     const newTask = addTask({
       title: '',
@@ -128,81 +227,95 @@ export function CalendarView() {
       startAfter: toLocalISO(startTime),
       dueDate: null,
       inInbox: false,
+      listId: ui.selectedListId ?? undefined,
+      scheduledBlocks: [],
+    });
+    updateTask(newTask.id, {
+      scheduledBlocks: [
+        {
+          id: `${newTask.id}-block`,
+          taskId: newTask.id,
+          startTime: toLocalISO(startTime),
+          endTime: toLocalISO(endTime),
+          duration: settings.defaultTaskDuration,
+          isManuallyPinned: true,
+        },
+      ],
     });
 
-    useMuseStore.getState().updateTask(newTask.id, {
-      scheduledBlocks: [{
-        id: newTask.id + '-block',
-        taskId: newTask.id,
-        startTime: toLocalISO(startTime),
-        endTime: toLocalISO(endTime),
-        duration: settings.defaultTaskDuration,
-        isManuallyPinned: true,
-      }],
-    });
-
-    openFloatingModal({
-      type: 'task',
-      id: newTask.id,
-      x: Math.min(e.clientX, window.innerWidth - 400),
-      y: Math.min(e.clientY, window.innerHeight - 500),
-    });
+    openFloatingModal({ type: 'task', id: newTask.id, x: e.clientX, y: e.clientY });
   };
 
   const cutoffDate = addWeeks(new Date(), settings.autoSchedulingCutoffWeeks);
 
   // ---- Drag-and-drop handlers ----
-  const toLocalISO = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm:ss");
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent, date: Date) => {
-    e.preventDefault();
-    const data = e.dataTransfer.getData('application/json');
-    if (!data) return;
+  const handleDrop = useCallback(
+    (e: React.DragEvent, date: Date) => {
+      e.preventDefault();
+      const data = e.dataTransfer.getData('application/json');
+      if (!data) return;
 
-    const { type, id, durationMinutes, grabOffsetY } = JSON.parse(data) as {
-      type: 'task' | 'event';
-      id: string;
-      durationMinutes: number;
-      grabOffsetY?: number;
-    };
+      let payload: {
+        type: 'task' | 'event';
+        id: string;
+        blockId?: string;
+        durationMinutes: number;
+        grabOffsetY?: number;
+      };
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        return;
+      }
+      const { type, id, blockId, durationMinutes, grabOffsetY } = payload;
 
-    // Calculate time from Y position relative to column, accounting for grab offset
-    const col = (e.currentTarget as HTMLElement);
-    const rect = col.getBoundingClientRect();
-    const yOffset = e.clientY - rect.top - (grabOffsetY || 0);
-    const totalMinutes = Math.max(0, (yOffset / HOUR_HEIGHT) * 60) + settings.dayStartHour * 60;
-    const snappedMinutes = Math.round(totalMinutes / 15) * 15;
-    const hour = Math.floor(snappedMinutes / 60);
-    const min = snappedMinutes % 60;
+      const newStart = timeAtPointer(date, e.currentTarget as HTMLElement, e.clientY, grabOffsetY || 0);
+      const newEnd = addMinutes(newStart, durationMinutes);
 
-    const newStart = new Date(date);
-    newStart.setHours(hour, min, 0, 0);
-    const newEnd = addMinutes(newStart, durationMinutes);
-
-    if (type === 'task') {
-      updateTask(id, {
-        autoSchedule: false,
-        scheduledBlocks: [{
-          id: id + '-dnd-block',
+      if (type === 'task') {
+        // Reposition just the dragged occurrence and pin it there — sibling
+        // blocks of a split task are left untouched, and the task keeps
+        // auto-scheduling its remaining (unpinned) work around this fixed spot.
+        const task = useMuseStore.getState().getTaskById(id);
+        if (!task) return;
+        const newBlock: ScheduledBlock = {
+          id: blockId || `${id}-dnd-${Date.now()}`,
           taskId: id,
           startTime: toLocalISO(newStart),
           endTime: toLocalISO(newEnd),
           duration: durationMinutes,
           isManuallyPinned: true,
-        }],
-      });
-    } else {
-      updateEvent(id, {
-        startTime: toLocalISO(newStart),
-        endTime: toLocalISO(newEnd),
-      });
-    }
-  }, [settings.dayStartHour, updateTask, updateEvent]);
+        };
+        const hasExistingBlock = !!blockId && task.scheduledBlocks.some((b) => b.id === blockId);
+        const scheduledBlocks = hasExistingBlock
+          ? task.scheduledBlocks.map((b) => (b.id === blockId ? newBlock : b))
+          : [...task.scheduledBlocks, newBlock];
+        updateTask(id, { scheduledBlocks });
+      } else {
+        updateEvent(id, { startTime: toLocalISO(newStart), endTime: toLocalISO(newEnd) });
+      }
+    },
+    [timeAtPointer, updateTask, updateEvent]
+  );
+
+  const openItem = (type: 'task' | 'event', id: string, e: React.MouseEvent | React.KeyboardEvent) => {
+    const pos =
+      'clientX' in e
+        ? { x: e.clientX, y: e.clientY }
+        : (() => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            return { x: r.right, y: r.top };
+          })();
+    openFloatingModal({ type, id, ...pos });
+  };
+
+  const nowMinutes = (currentTime.getHours() - viewStartHour) * 60 + currentTime.getMinutes();
+  const nowVisible = nowMinutes >= 0 && nowMinutes <= (viewEndHour - viewStartHour) * 60;
 
   return (
     <div className="h-full flex flex-col font-mono">
@@ -213,10 +326,18 @@ export function CalendarView() {
             today
           </button>
           <div className="flex items-center">
-            <button onClick={navigateBack} className="px-1.5 py-0.5 hover:bg-nord2 transition-colors">
+            <button
+              onClick={() => navigate(-1)}
+              className="px-1.5 py-0.5 hover:bg-nord2 transition-colors"
+              aria-label="Previous"
+            >
               <ChevronLeft size={14} className="text-nord4" />
             </button>
-            <button onClick={navigateForward} className="px-1.5 py-0.5 hover:bg-nord2 transition-colors">
+            <button
+              onClick={() => navigate(1)}
+              className="px-1.5 py-0.5 hover:bg-nord2 transition-colors"
+              aria-label="Next"
+            >
               <ChevronRight size={14} className="text-nord4" />
             </button>
           </div>
@@ -228,7 +349,7 @@ export function CalendarView() {
           </h2>
           {ui.selectedListId && (
             <span className="text-[10px] text-nord8 border border-nord8 px-1.5 py-0.5">
-              {lists.find(l => l.id === ui.selectedListId)?.name || 'list'}
+              {lists.find((l) => l.id === ui.selectedListId)?.name || 'list'}
             </span>
           )}
         </div>
@@ -273,9 +394,7 @@ export function CalendarView() {
               </div>
               <div
                 className={`text-sm font-bold mt-0.5 ${
-                  today
-                    ? 'text-nord0 bg-nord8 w-6 h-6 flex items-center justify-center mx-auto'
-                    : 'text-nord4'
+                  today ? 'text-nord0 bg-nord8 w-6 h-6 flex items-center justify-center mx-auto' : 'text-nord4'
                 }`}
               >
                 {format(date, 'd')}
@@ -286,16 +405,25 @@ export function CalendarView() {
       </div>
 
       {/* All-Day Events */}
-      <AllDayRow columns={columns} events={events} />
+      <AllDayRow
+        columns={columns}
+        events={events}
+        onOpen={(id, e) => openItem('event', id, e)}
+      />
 
       {/* Time Grid */}
-      <div ref={scrollRef} className="flex-1 calendar-scroll relative">
+      <div ref={scrollRef} className="flex-1 calendar-scroll relative" data-tour="calendar">
         <div className="flex" style={{ minHeight: hours.length * HOUR_HEIGHT }}>
           {/* Time Gutter */}
           <div className="w-14 flex-shrink-0 border-r border-nord3/[0.08]">
             {hours.map((hour) => (
               <div key={hour} className="relative" style={{ height: HOUR_HEIGHT }}>
-                <span className="absolute -top-2 right-1.5 text-[10px] text-nord3 font-mono">
+                {/* The first label sits inside the grid so it isn't clipped by the header */}
+                <span
+                  className={`absolute right-1.5 text-[10px] text-nord3 font-mono ${
+                    hour === viewStartHour ? 'top-0.5' : '-top-2'
+                  }`}
+                >
                   {settings.timeFormat === '24h'
                     ? `${String(hour).padStart(2, '0')}:00`
                     : format(setHours(new Date(), hour), 'ha')}
@@ -309,21 +437,7 @@ export function CalendarView() {
             const dayStr = format(date, 'yyyy-MM-dd');
             const isBeyondCutoff = isAfter(date, cutoffDate);
             const today = isToday(date);
-
-            const dayEvents = events.filter((ev) => {
-              if (ev.allDay) return false;
-              return isSameDay(parseISO(ev.startTime), date);
-            });
-
-            const dayBlocks: (ScheduledBlock & { task: Task })[] = [];
-            for (const task of filteredTasks) {
-              if (task.completed) continue;
-              for (const block of task.scheduledBlocks) {
-                if (isSameDay(parseISO(block.startTime), date)) {
-                  dayBlocks.push({ ...block, task });
-                }
-              }
-            }
+            const viewStart = addMinutes(startOfDay(date), viewStartHour * 60);
 
             return (
               <div
@@ -333,67 +447,58 @@ export function CalendarView() {
                 } ${isBeyondCutoff ? 'cutoff-stripes' : ''} ${today ? 'bg-nord8/[0.03]' : ''}`}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, date)}
+                onDoubleClick={(e) => handleColumnDoubleClick(date, e)}
               >
                 {hours.map((hour) => (
                   <div
                     key={hour}
                     className="border-t border-nord3/[0.06] cursor-pointer hover:bg-nord2/30 transition-colors"
                     style={{ height: HOUR_HEIGHT }}
-                    onDoubleClick={(e) => handleTimeSlotClick(date, hour, e)}
                   >
                     <div className="border-t border-nord3/[0.03]" style={{ height: 0, marginTop: HOUR_HEIGHT / 2 }} />
                   </div>
                 ))}
 
                 {/* Now Line */}
-                {today && (
-                  <div
-                    className="now-line"
-                    style={{
-                      top: `${
-                        ((currentTime.getHours() - settings.dayStartHour) * 60 +
-                          currentTime.getMinutes()) *
-                        (HOUR_HEIGHT / 60)
-                      }px`,
-                    }}
-                  />
+                {today && nowVisible && (
+                  <div className="now-line" style={{ top: `${nowMinutes * (HOUR_HEIGHT / 60)}px` }} />
                 )}
 
-                {/* Events */}
-                {dayEvents.map((event) => (
-                  <EventBlock
-                    key={event.id}
-                    event={event}
-                    dayStartHour={settings.dayStartHour}
-                    onClick={(e) => {
-                      openFloatingModal({
-                        type: 'event',
-                        id: event.id,
-                        x: Math.min(e.clientX, window.innerWidth - 400),
-                        y: Math.min(e.clientY, window.innerHeight - 500),
-                      });
-                    }}
-                  />
-                ))}
-
-                {/* Task Blocks */}
-                {dayBlocks.map((block) => (
-                  <TaskBlock
-                    key={block.id}
-                    block={block}
-                    task={block.task}
-                    dayStartHour={settings.dayStartHour}
-                    smartColor={settings.smartColorCoding}
-                    onClick={(e) => {
-                      openFloatingModal({
-                        type: 'task',
-                        id: block.task.id,
-                        x: Math.min(e.clientX, window.innerWidth - 400),
-                        y: Math.min(e.clientY, window.innerHeight - 500),
-                      });
-                    }}
-                  />
-                ))}
+                {segmentsByColumn[colIdx].map((seg) => {
+                  const top = differenceInMinutes(seg.start, viewStart) * (HOUR_HEIGHT / 60);
+                  const height = Math.max(
+                    MIN_BLOCK_HEIGHT,
+                    differenceInMinutes(seg.end, seg.start) * (HOUR_HEIGHT / 60)
+                  );
+                  const width = 100 / seg.lanes;
+                  const geometry = {
+                    top,
+                    height,
+                    left: `calc(${seg.lane * width}% + 2px)`,
+                    width: `calc(${width}% - 4px)`,
+                  };
+                  return seg.kind === 'event' && seg.event ? (
+                    <EventBlock
+                      key={seg.key}
+                      event={seg.event}
+                      segStart={seg.start}
+                      segEnd={seg.end}
+                      geometry={geometry}
+                      onOpen={(e) => openItem('event', seg.event!.id, e)}
+                    />
+                  ) : seg.task && seg.block ? (
+                    <TaskBlock
+                      key={seg.key}
+                      block={seg.block}
+                      task={seg.task}
+                      segStart={seg.start}
+                      segEnd={seg.end}
+                      geometry={geometry}
+                      smartColor={settings.smartColorCoding}
+                      onOpen={(e) => openItem('task', seg.task!.id, e)}
+                    />
+                  ) : null;
+                })}
               </div>
             );
           })}
@@ -407,9 +512,26 @@ export function CalendarView() {
 // All-Day Events Row
 // ============================================================
 
-function AllDayRow({ columns, events }: { columns: Date[]; events: CalendarEvent[] }) {
+function AllDayRow({
+  columns,
+  events,
+  onOpen,
+}: {
+  columns: Date[];
+  events: CalendarEvent[];
+  onOpen: (id: string, e: React.MouseEvent | React.KeyboardEvent) => void;
+}) {
   const allDayEvents = events.filter((e) => e.allDay);
   if (allDayEvents.length === 0) return null;
+
+  // All-day events cover [start day, end day) — multi-day ones show on each day.
+  const coversDay = (event: CalendarEvent, day: Date) => {
+    const start = startOfDay(parseISO(event.startTime));
+    const endRaw = parseISO(event.endTime);
+    const end = isAfter(endRaw, start) ? endRaw : addDays(start, 1);
+    const dayStart = startOfDay(day);
+    return !isBefore(dayStart, start) && isBefore(dayStart, end);
+  };
 
   return (
     <div className="flex border-b border-nord3/10 bg-nord0/50 calendar-header-row">
@@ -417,15 +539,19 @@ function AllDayRow({ columns, events }: { columns: Date[]; events: CalendarEvent
         <span className="text-[9px] text-nord3 font-mono">ALL</span>
       </div>
       {columns.map((date, i) => {
-        const dayEvents = allDayEvents.filter((e) => isSameDay(parseISO(e.startTime), date));
+        const dayEvents = allDayEvents.filter((e) => coversDay(e, date));
         return (
           <div
             key={date.toISOString()}
-            className={`flex-1 ${i < columns.length - 1 ? 'border-r border-nord3/10' : ''} px-0.5 py-0.5 min-h-[24px]`}
+            className={`flex-1 min-w-0 ${i < columns.length - 1 ? 'border-r border-nord3/10' : ''} px-0.5 py-0.5 min-h-[24px]`}
           >
             {dayEvents.map((event) => (
               <div
                 key={event.id}
+                role="button"
+                tabIndex={0}
+                onClick={(e) => onOpen(event.id, e)}
+                onKeyDown={(e) => e.key === 'Enter' && onOpen(event.id, e)}
                 className="text-[10px] px-1.5 py-0.5 truncate cursor-pointer hover:opacity-80 transition-opacity mb-0.5 font-mono"
                 style={{
                   backgroundColor: event.color + '25',
@@ -444,139 +570,145 @@ function AllDayRow({ columns, events }: { columns: Date[]; events: CalendarEvent
 }
 
 // ============================================================
-// Event Block
+// Blocks
 // ============================================================
+
+interface Geometry {
+  top: number;
+  height: number;
+  left: string;
+  width: string;
+}
+
+function startDrag(
+  e: React.DragEvent,
+  payload: { type: 'task' | 'event'; id: string; blockId?: string; durationMinutes: number }
+) {
+  const blockRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  e.dataTransfer.setData(
+    'application/json',
+    // grabOffsetY is in screen pixels; the drop handler converts it with the root scale.
+    JSON.stringify({ ...payload, grabOffsetY: e.clientY - blockRect.top })
+  );
+  e.dataTransfer.effectAllowed = 'move';
+}
 
 function EventBlock({
   event,
-  dayStartHour,
-  onClick,
+  segStart,
+  segEnd,
+  geometry,
+  onOpen,
 }: {
   event: CalendarEvent;
-  dayStartHour: number;
-  onClick: (e: React.MouseEvent) => void;
+  segStart: Date;
+  segEnd: Date;
+  geometry: Geometry;
+  onOpen: (e: React.MouseEvent | React.KeyboardEvent) => void;
 }) {
-  const start = parseISO(event.startTime);
-  const end = parseISO(event.endTime);
-  const startMinute = (start.getHours() - dayStartHour) * 60 + start.getMinutes();
-  const duration = differenceInMinutes(end, start);
-  const top = startMinute * (HOUR_HEIGHT / 60);
-  const height = Math.max(MIN_BLOCK_HEIGHT, duration * (HOUR_HEIGHT / 60));
+  const fullDuration = differenceInMinutes(parseISO(event.endTime), parseISO(event.startTime));
 
   return (
     <div
-      className="absolute left-0.5 right-0.5 px-1.5 py-0.5 cursor-grab overflow-hidden z-10 hover:z-20 hover:brightness-110 transition-all font-mono active:cursor-grabbing"
+      data-block
+      role="button"
+      tabIndex={0}
+      className="absolute px-1.5 py-0.5 cursor-grab overflow-hidden z-10 hover:z-20 hover:brightness-110 transition-all font-mono active:cursor-grabbing focus:outline focus:outline-1 focus:outline-nord8"
       draggable
-      onDragStart={(e) => {
-        const blockRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const grabOffsetY = e.clientY - blockRect.top;
-        e.dataTransfer.setData('application/json', JSON.stringify({
-          type: 'event',
-          id: event.id,
-          durationMinutes: duration,
-          grabOffsetY,
-        }));
-        e.dataTransfer.effectAllowed = 'move';
-      }}
+      onDragStart={(e) => startDrag(e, { type: 'event', id: event.id, durationMinutes: fullDuration })}
       style={{
-        top: `${top}px`,
-        height: `${height}px`,
+        ...geometry,
+        top: `${geometry.top}px`,
+        height: `${geometry.height}px`,
         backgroundColor: event.color + '20',
-        borderLeft: `2px solid ${event.color}`,
         border: `1px solid ${event.color}40`,
-        borderLeftWidth: '2px',
+        borderLeft: `2px solid ${event.color}`,
+        opacity: event.busy ? 1 : 0.75,
       }}
-      onClick={onClick}
+      title={event.busy ? undefined : 'Free — tasks may be scheduled over this'}
+      onClick={onOpen}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen(e)}
     >
       <div className="text-[10px] font-bold truncate" style={{ color: event.color }}>
         {event.title}
       </div>
-      {height > 28 && (
+      {geometry.height > 28 && (
         <div className="text-[9px] text-nord4 truncate">
-          {format(start, 'HH:mm')}-{format(end, 'HH:mm')}
+          {format(segStart, 'HH:mm')}-{format(segEnd, 'HH:mm')}
         </div>
       )}
-      {height > 42 && event.location && (
+      {geometry.height > 42 && event.location && (
         <div className="text-[9px] text-nord3 truncate mt-0.5">@ {event.location}</div>
       )}
     </div>
   );
 }
 
-// ============================================================
-// Task Block
-// ============================================================
-
 function TaskBlock({
   block,
   task,
-  dayStartHour,
+  segStart,
+  segEnd,
+  geometry,
   smartColor,
-  onClick,
+  onOpen,
 }: {
   block: ScheduledBlock;
   task: Task;
-  dayStartHour: number;
+  segStart: Date;
+  segEnd: Date;
+  geometry: Geometry;
   smartColor: boolean;
-  onClick: (e: React.MouseEvent) => void;
+  onOpen: (e: React.MouseEvent | React.KeyboardEvent) => void;
 }) {
-  const start = parseISO(block.startTime);
-  const end = parseISO(block.endTime);
-  const startMinute = (start.getHours() - dayStartHour) * 60 + start.getMinutes();
-  const duration = differenceInMinutes(end, start);
-  const top = startMinute * (HOUR_HEIGHT / 60);
-  const height = Math.max(MIN_BLOCK_HEIGHT, duration * (HOUR_HEIGHT / 60));
-
   const urgencyClasses = smartColor
-    ? { [UrgencyColor.Green]: 'urgency-green', [UrgencyColor.Orange]: 'urgency-orange', [UrgencyColor.Red]: 'urgency-red' }[task.urgencyColor]
+    ? {
+        [UrgencyColor.Green]: 'urgency-green',
+        [UrgencyColor.Orange]: 'urgency-orange',
+        [UrgencyColor.Red]: 'urgency-red',
+      }[task.urgencyColor]
     : '';
-
-  const bgColor = smartColor ? undefined : task.color + '20';
-  const borderColor = smartColor ? undefined : task.color;
   const progress = task.duration > 0 ? (task.progress / task.duration) * 100 : 0;
 
   return (
     <div
-      className={`absolute left-0.5 right-0.5 px-1.5 py-0.5 cursor-grab overflow-hidden z-10 hover:z-20 hover:brightness-110 transition-all font-mono active:cursor-grabbing ${urgencyClasses}`}
+      data-block
+      role="button"
+      tabIndex={0}
+      className={`absolute px-1.5 py-0.5 cursor-grab overflow-hidden z-10 hover:z-20 hover:brightness-110 transition-all font-mono active:cursor-grabbing focus:outline focus:outline-1 focus:outline-nord8 ${urgencyClasses}`}
       draggable
-      onDragStart={(e) => {
-        const blockRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const grabOffsetY = e.clientY - blockRect.top;
-        e.dataTransfer.setData('application/json', JSON.stringify({
-          type: 'task',
-          id: task.id,
-          durationMinutes: duration,
-          grabOffsetY,
-        }));
-        e.dataTransfer.effectAllowed = 'move';
-      }}
+      onDragStart={(e) =>
+        startDrag(e, { type: 'task', id: task.id, blockId: block.id, durationMinutes: block.duration })
+      }
       style={{
-        top: `${top}px`,
-        height: `${height}px`,
+        ...geometry,
+        top: `${geometry.top}px`,
+        height: `${geometry.height}px`,
         ...(smartColor
           ? {}
           : {
-              backgroundColor: bgColor,
-              borderLeft: `2px solid ${borderColor}`,
-              border: `1px solid ${borderColor}40`,
-              borderLeftWidth: '2px',
+              backgroundColor: task.color + '20',
+              border: `1px solid ${task.color}40`,
+              borderLeft: `2px solid ${task.color}`,
             }),
       }}
-      onClick={onClick}
+      onClick={onOpen}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen(e)}
     >
       <div className="flex items-center gap-1">
+        {block.isManuallyPinned && (
+          <Pin size={8} className="text-nord4 flex-shrink-0" aria-label="Pinned" />
+        )}
         {task.splittable && <span className="text-[8px] text-nord13">◧</span>}
-        <div className="text-[10px] font-bold truncate text-nord6 flex-1">
-          {task.title || 'untitled'}
-        </div>
+        <div className="text-[10px] font-bold truncate text-nord6 flex-1">{task.title || 'untitled'}</div>
       </div>
-      {height > 28 && (
+      {geometry.height > 28 && (
         <div className="text-[9px] text-nord4 truncate">
-          {format(start, 'HH:mm')}-{format(end, 'HH:mm')}
+          {format(segStart, 'HH:mm')}-{format(segEnd, 'HH:mm')}
           {task.splittable && ' [split]'}
         </div>
       )}
-      {height > 38 && progress > 0 && (
+      {geometry.height > 38 && progress > 0 && (
         <div className="mt-0.5 w-full h-1 bg-nord3/50 overflow-hidden">
           <div className="progress-bar h-full" style={{ width: `${progress}%` }} />
         </div>

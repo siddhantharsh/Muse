@@ -3,22 +3,28 @@
 // Aggregates all overdue tasks with infinite scroll
 // ============================================================
 
-import React, { useState } from 'react';
-import {
-  AlertTriangle,
-  Clock,
-  CalendarDays,
-  Flag,
-  Trash2,
-  Check,
-  ChevronRight,
-  ArrowRight,
-  RefreshCw,
-} from 'lucide-react';
+import React from 'react';
+import { AlertTriangle, Clock, CalendarDays, Trash2, Check, RefreshCw } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
-import { Task, Priority, UrgencyColor } from '../types';
-import { format, parseISO, differenceInDays } from 'date-fns';
-import { durationToReadable } from '../utils/dateUtils';
+import { format, parseISO, differenceInMinutes, addDays, isAfter } from 'date-fns';
+import { durationToReadable, toLocalISO } from '../utils/dateUtils';
+import { getMissedTasks } from '../utils/taskSelectors';
+
+/** "40m", "5h", "3d" — how long ago a deadline passed. */
+function overdueLabel(dueDate: string, now: Date): string {
+  const mins = Math.max(0, differenceInMinutes(now, parseISO(dueDate)));
+  if (mins < 60) return `${mins}m overdue`;
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)}h overdue`;
+  return `${Math.floor(mins / (24 * 60))}d overdue`;
+}
+
+/** New deadline three days from now, keeping the original time of day. */
+function threeDaysFromNow(dueDate: string, now: Date): string {
+  const due = parseISO(dueDate);
+  const next = addDays(isAfter(due, now) ? due : now, 3);
+  next.setHours(due.getHours(), due.getMinutes(), 0, 0);
+  return toLocalISO(next);
+}
 
 export function MissedDeadlinesView() {
   const {
@@ -32,28 +38,19 @@ export function MissedDeadlinesView() {
     ui,
     toggleMultiSelect,
     toggleMultiSelectItem,
-    clearMultiSelect,
     openFloatingModal,
     recalculate,
   } = useMuseStore();
 
-  const [showBulkMoveDropdown, setShowBulkMoveDropdown] = useState(false);
+  const now = new Date();
+  // Same definition the sidebar badge uses — series templates are excluded,
+  // auto-skipped occurrences are closed by the engine.
+  const overdueTasks = getMissedTasks(tasks, now);
 
-  // All overdue tasks (red urgency)
-  const overdueTasks = tasks.filter(
-    (t) =>
-      !t.completed &&
-      t.dueDate &&
-      new Date(t.dueDate) < new Date() &&
-      !t.autoIgnore
+  // Most overdue first
+  const sortedOverdue = [...overdueTasks].sort(
+    (a, b) => parseISO(a.dueDate!).getTime() - parseISO(b.dueDate!).getTime()
   );
-
-  const sortedOverdue = overdueTasks.sort((a, b) => {
-    // Most overdue first
-    const aDays = differenceInDays(new Date(), parseISO(a.dueDate!));
-    const bDays = differenceInDays(new Date(), parseISO(b.dueDate!));
-    return bDays - aDays;
-  });
 
   return (
     <div className="h-full flex flex-col bg-nord0">
@@ -122,8 +119,10 @@ export function MissedDeadlinesView() {
         ) : (
           <div className="space-y-2">
             {sortedOverdue.map((task) => {
-              const daysOverdue = differenceInDays(new Date(), parseISO(task.dueDate!));
               const list = lists.find((l) => l.id === task.listId);
+              // Visible on touch screens (no hover) and on keyboard focus.
+              const actionClass =
+                'transition-all md:opacity-0 md:group-hover:opacity-100 focus:opacity-100';
 
               return (
                 <div
@@ -160,6 +159,7 @@ export function MissedDeadlinesView() {
                         e.stopPropagation();
                         completeTask(task.id);
                       }}
+                      aria-label={`Mark “${task.title || 'Untitled'}” as done`}
                       className="w-5 h-5  border-2 border-red-500/50 hover:border-red-400 flex-shrink-0 transition-colors"
                     />
                   )}
@@ -170,7 +170,8 @@ export function MissedDeadlinesView() {
                         {task.title || 'Untitled'}
                       </span>
                       <span className="text-[10px] bg-nord11/20 text-nord11 px-1.5 py-0.5  font-bold flex-shrink-0">
-                        {daysOverdue}d overdue
+                        {task.isRepeatingInstance ? 'missed · ' : ''}
+                        {overdueLabel(task.dueDate!, now)}
                       </span>
                     </div>
                     <div className="flex items-center gap-3 mt-1">
@@ -199,32 +200,31 @@ export function MissedDeadlinesView() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Extend deadline by 3 days
-                        const newDue = new Date(task.dueDate!);
-                        newDue.setDate(newDue.getDate() + 3);
-                        updateTask(task.id, { dueDate: newDue.toISOString() });
+                        updateTask(task.id, { dueDate: threeDaysFromNow(task.dueDate!, now) });
                       }}
-                      className="px-2 py-1 text-[10px] text-nord3 hover:bg-nord2 hover:text-nord6 transition-all opacity-0 group-hover:opacity-100"
-                      title="Extend deadline +3 days"
+                      className={`px-2 py-1 text-[10px] text-nord4 hover:bg-nord2 hover:text-nord6 ${actionClass}`}
+                      title="New deadline three days from now — it goes back on the schedule"
                     >
-                      +3d
+                      +3 days
                     </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         updateTask(task.id, { dueDate: null });
                       }}
-                      className="px-2 py-1 text-[10px] text-nord3 hover:bg-nord2 hover:text-nord6 transition-all opacity-0 group-hover:opacity-100"
-                      title="Remove deadline (move to backlog)"
+                      className={`px-2 py-1 text-[10px] text-nord4 hover:bg-nord2 hover:text-nord6 ${actionClass}`}
+                      title="Remove the deadline — it's scheduled whenever there's room"
                     >
-                      No Due
+                      No deadline
                     </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteTask(task.id);
                       }}
-                      className="p-1 text-nord3 hover:bg-nord11/20 hover:text-nord11 transition-all opacity-0 group-hover:opacity-100"
+                      aria-label={task.isRepeatingInstance ? 'Skip this occurrence' : 'Delete task'}
+                      title={task.isRepeatingInstance ? 'Skip this occurrence' : 'Delete task'}
+                      className={`p-1 text-nord4 hover:bg-nord11/20 hover:text-nord11 ${actionClass}`}
                     >
                       <Trash2 size={12} />
                     </button>

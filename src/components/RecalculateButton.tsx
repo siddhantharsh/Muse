@@ -12,6 +12,7 @@ export function RecalculateButton() {
 
   return (
     <button
+      data-tour="recalculate"
       onClick={recalculate}
       disabled={isRecalculating}
       className={`absolute bottom-4 right-4 z-30 flex items-center gap-2 px-3 py-2 text-xs font-mono border transition-all ${

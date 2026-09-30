@@ -69,6 +69,7 @@ export interface RepeatingRule {
   dayOfMonth?: number;    // for monthly
   endDate?: string;       // ISO date, optional
   count?: number;         // max occurrences
+  exceptions?: string[];  // yyyy-MM-dd occurrences the user deleted — never regenerated
 }
 
 // ---- Event Schema (Rigid Temporal Anchors) ----
@@ -123,6 +124,9 @@ export interface Task {
   // Scheduling result
   scheduledBlocks: ScheduledBlock[];
   urgencyColor: UrgencyColor;
+  // True when the engine could not place this task because a prerequisite
+  // in dependsOn is incomplete and has no resolvable start time
+  schedulingBlocked: boolean;
   // Inbox state
   inInbox: boolean;
   // Metadata
@@ -196,6 +200,8 @@ export interface AppSettings {
   dayEndHour: number;                // 0-23
   // Scheduling hours
   schedulingHoursProfiles: SchedulingHoursProfile[];
+  // Onboarding — synced with the account so the tour shows once per person
+  tutorialCompleted: boolean;
 }
 
 // ---- UI State ----
@@ -210,7 +216,7 @@ export interface FloatingModal {
 export interface UIState {
   sidebarOpen: boolean;
   sidebarWidth: number;
-  activeView: 'calendar' | 'inbox' | 'missed-deadlines' | 'settings';
+  activeView: 'calendar' | 'tasks' | 'inbox' | 'missed-deadlines' | 'settings';
   selectedListId: string | null;
   selectedDate: string;           // ISO date
   viewMode: ViewMode;
@@ -222,7 +228,23 @@ export interface UIState {
   discardChangesModal: boolean;
   commandPaletteOpen: boolean;
   searchQuery: string;
+  tutorialOpen: boolean;
+  // This device's answer to "log in with email?" (null = not asked yet)
+  onboardingChoice: OnboardingChoice | null;
+  // Signed-in account (null = offline / signed out) and sync health
+  account: CloudAccount | null;
+  cloudStatus: CloudStatus;
+  cloudError: string | null;
 }
+
+export interface CloudAccount {
+  uid: string;
+  email: string | null;
+}
+
+export type CloudStatus = 'idle' | 'syncing' | 'ready' | 'error';
+
+export type OnboardingChoice = 'offline' | 'account';
 
 // ---- Utility Types ----
 

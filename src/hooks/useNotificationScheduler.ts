@@ -59,7 +59,7 @@ export function useNotificationScheduler() {
       // Check events — same logic
       for (const event of events) {
         if (event.allDay) continue;
-        const key = `event-${event.id}`;
+        const key = `event-${event.id}-${event.startTime}`;
         if (notifiedIds.has(key)) continue;
 
         const eventStart = parseISO(event.startTime);
@@ -78,9 +78,22 @@ export function useNotificationScheduler() {
         }
       }
 
-      // Prune old entries periodically (keep set from growing unbounded)
-      if (notifiedIds.size > 200) {
-        notifiedIds.clear();
+      // Keep the set bounded by dropping only entries for items that already
+      // started. (Clearing everything would re-fire reminders for items
+      // still inside their lead window.)
+      if (notifiedIds.size > 500) {
+        const live = new Set<string>();
+        for (const task of tasks) {
+          for (const block of task.scheduledBlocks) {
+            if (differenceInMinutes(parseISO(block.startTime), now) >= 0) {
+              live.add(`task-${task.id}-${block.startTime}`);
+            }
+          }
+        }
+        for (const event of events) {
+          if (differenceInMinutes(parseISO(event.startTime), now) >= 0) live.add(`event-${event.id}-${event.startTime}`);
+        }
+        for (const key of [...notifiedIds]) if (!live.has(key)) notifiedIds.delete(key);
       }
     };
 

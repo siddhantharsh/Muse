@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://muse-in.web.app/sitemap.xml

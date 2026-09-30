@@ -111,6 +111,30 @@ export function removeFromStorage(key: string): void {
   idbSet(`${STORAGE_PREFIX}${key}`, undefined).catch(() => {});
 }
 
+/** Wipes every persisted Muse data key (used on sign-out). */
+export function clearDataStorage(keys: string[]): void {
+  for (const key of keys) removeFromStorage(key);
+}
+
+// ---- Small device-level flags (not part of synced app data) ----
+
+export function readFlag(key: string): string | null {
+  try {
+    return localStorage.getItem(`${STORAGE_PREFIX}${key}`);
+  } catch {
+    return null;
+  }
+}
+
+export function writeFlag(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
+    else localStorage.setItem(`${STORAGE_PREFIX}${key}`, value);
+  } catch {
+    /* storage unavailable (private mode) — flags are conveniences only */
+  }
+}
+
 /**
  * Export all Muse data as a JSON blob (for manual backup / cloud sync)
  */

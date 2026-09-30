@@ -16,5 +16,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      input: {
+        // '/' — marketing landing page
+        main: path.resolve(__dirname, 'index.html'),
+        // '/app.html' — the actual scheduler app (Electron and the PWA launch here)
+        app: path.resolve(__dirname, 'app.html'),
+      },
+    },
   },
 });

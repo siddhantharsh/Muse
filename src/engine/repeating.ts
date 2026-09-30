@@ -1,6 +1,14 @@
 // ============================================================
 // Muse — Repeating Instance Generator
-// Expands repeating tasks/events into concrete instances
+// Expands repeating tasks/events into concrete occurrences.
+//
+// Rules that keep a series stable across recalculations:
+//  - Occurrence k is computed from the series' base date directly
+//    (base + k·interval), so month-end dates never drift (Jan 31 →
+//    Feb 28 → Mar 31, not → Mar 28).
+//  - Occurrences whose deadline has already passed are never created;
+//    only real, existing occurrences can become "missed".
+//  - Dates the user deleted are stored in rule.exceptions and skipped.
 // ============================================================
 
 import { v4 as uuidv4 } from 'uuid';
@@ -11,257 +19,218 @@ import {
   addWeeks,
   addMonths,
   addYears,
+  addMinutes,
   format,
   isBefore,
   isAfter,
+  startOfDay,
+  endOfDay,
   differenceInMinutes,
-  differenceInDays,
+  getDaysInMonth,
 } from 'date-fns';
+
+// Upper bound on occurrences walked per series (≈ 27 years of daily).
+const HARD_CAP = 10_000;
 
 function toLocalISO(d: Date): string {
   return format(d, "yyyy-MM-dd'T'HH:mm:ss");
 }
 
 // ============================================================
-// Generate task instances from a repeating parent
+// Occurrence sequence
+// ============================================================
+
+function nthOccurrence(base: Date, rule: RepeatingRule, k: number, interval: number): Date {
+  switch (rule.frequency) {
+    case RepeatFrequency.Weekly:
+      return addWeeks(base, k * interval);
+    case RepeatFrequency.Biweekly:
+      return addWeeks(base, 2 * k * interval);
+    case RepeatFrequency.Monthly: {
+      const d = addMonths(base, k * interval);
+      if (rule.dayOfMonth) {
+        d.setDate(Math.min(rule.dayOfMonth, getDaysInMonth(d)));
+      }
+      return d;
+    }
+    case RepeatFrequency.Yearly:
+      return addYears(base, k * interval);
+    case RepeatFrequency.Daily:
+    case RepeatFrequency.Custom:
+    default:
+      return addDays(base, k * interval);
+  }
+}
+
+/** Weekly-on-specific-days: next matching weekday, honoring the week interval. */
+function nextWeeklyByDays(current: Date, days: number[], interval: number): Date {
+  const currentDay = current.getDay();
+  const laterThisWeek = days.find((d) => d > currentDay);
+  if (laterThisWeek !== undefined) return addDays(current, laterThisWeek - currentDay);
+  // Jump to Sunday of the next cycle week, then to its first matching day.
+  return addDays(current, 7 - currentDay + (interval - 1) * 7 + days[0]);
+}
+
+/** Yields the series' occurrences in order, starting at the base when includeBase. */
+function* occurrences(base: Date, rule: RepeatingRule, includeBase: boolean): Generator<Date> {
+  const interval = Math.max(1, Math.floor(rule.interval || 1));
+
+  if (rule.frequency === RepeatFrequency.Weekly && rule.daysOfWeek && rule.daysOfWeek.length > 0) {
+    const days = [...new Set(rule.daysOfWeek)].filter((d) => d >= 0 && d <= 6).sort((a, b) => a - b);
+    if (days.length === 0) return;
+    let current = base;
+    if (includeBase && days.includes(base.getDay())) yield base;
+    for (let i = 0; i < HARD_CAP; i++) {
+      current = nextWeeklyByDays(current, days, interval);
+      yield current;
+    }
+    return;
+  }
+
+  for (let k = includeBase ? 0 : 1; k < HARD_CAP; k++) {
+    yield nthOccurrence(base, rule, k, interval);
+  }
+}
+
+function ruleLimits(rule: RepeatingRule) {
+  return {
+    endDate: rule.endDate ? endOfDay(parseISO(rule.endDate)) : null,
+    maxCount: rule.count && rule.count > 0 ? rule.count : Infinity,
+    exceptions: new Set(rule.exceptions ?? []),
+  };
+}
+
+// ============================================================
+// Tasks
 // ============================================================
 
 export function generateRepeatingTaskInstances(
   parentTask: Task,
-  existingInstances: Task[],
+  allTasks: Task[],
   cutoff: Date,
-  maxUpcoming: number = 3
+  maxUpcoming: number = 3,
+  now: Date = new Date()
 ): Task[] {
-  if (!parentTask.repeatingRule) return [];
-
   const rule = parentTask.repeatingRule;
-  const baseDate = parentTask.dueDate
-    ? parseISO(parentTask.dueDate)
-    : parentTask.startAfter
-    ? parseISO(parentTask.startAfter)
-    : parseISO(parentTask.createdAt);
+  if (!rule || parentTask.completed) return [];
 
-  // Collect dates for which an instance already exists (completed or not)
-  const existingDueDates = new Set(
-    existingInstances
-      .filter((t) => t.parentRepeatingId === parentTask.id)
-      .map((t) => t.dueDate ? t.dueDate.slice(0, 10) : '')
-      .filter(Boolean)
-  );
+  const hasDue = !!parentTask.dueDate;
+  const base = parseISO(parentTask.dueDate ?? parentTask.startAfter ?? parentTask.createdAt);
+  if (isNaN(base.getTime())) return [];
 
-  // Count existing uncompleted future instances for this parent
-  const now = new Date();
-  const existingFutureCount = existingInstances.filter(
-    (t) =>
-      t.parentRepeatingId === parentTask.id &&
-      !t.completed &&
-      t.dueDate &&
-      !isBefore(parseISO(t.dueDate), now)
+  const { endDate, maxCount, exceptions } = ruleLimits(rule);
+  const series = allTasks.filter((t) => t.parentRepeatingId === parentTask.id);
+  const existingDays = new Set(series.map((t) => t.dueDate?.slice(0, 10)).filter(Boolean));
+  let upcoming = series.filter(
+    (t) => !t.completed && t.dueDate && !isBefore(parseISO(t.dueDate), now)
   ).length;
 
-  // Only generate enough to fill up to maxUpcoming
-  const needed = Math.max(0, maxUpcoming - existingFutureCount);
-  if (needed === 0) return [];
+  // Preserve the parent's "can start N minutes before it's due" window.
+  const leadMinutes =
+    parentTask.startAfter && parentTask.dueDate
+      ? Math.max(0, differenceInMinutes(parseISO(parentTask.dueDate), parseISO(parentTask.startAfter)))
+      : null;
 
-  const newInstances: Task[] = [];
-  let occurrenceCount = 0;
-  const maxOccurrences = rule.count || 365;
-  let current = baseDate;
+  const created: Task[] = [];
+  let index = 0;
 
-  // Start from next occurrence after the base
-  current = getNextOccurrence(current, rule);
+  for (const occurrence of occurrences(base, rule, true)) {
+    index++;
+    if (index > maxCount || !isBefore(occurrence, cutoff) || upcoming >= maxUpcoming) break;
+    if (endDate && isAfter(occurrence, endDate)) break;
 
-  while (
-    isBefore(current, cutoff) &&
-    occurrenceCount < maxOccurrences &&
-    newInstances.length < needed
-  ) {
-    // Check end date
-    if (rule.endDate && isAfter(current, parseISO(rule.endDate))) break;
+    // Without a due time on the template, an occurrence is due by the end of its day.
+    const due = new Date(hasDue ? occurrence : endOfDay(occurrence));
+    due.setSeconds(0, 0);
+    if (isBefore(due, now)) continue;
 
-    const dateKey = format(current, 'yyyy-MM-dd');
+    const dayKey = format(occurrence, 'yyyy-MM-dd');
+    if (exceptions.has(dayKey) || existingDays.has(dayKey)) continue;
 
-    // Only create if instance doesn't already exist
-    if (!existingDueDates.has(dateKey)) {
-      // Compute startAfter: constrain each instance so it only schedules
-      // on or near its intended day (prevents all instances piling up on today)
-      let instanceStartAfter: string;
-      if (parentTask.startAfter && parentTask.dueDate) {
-        // Preserve the parent's startAfter-to-dueDate gap
-        const gap = differenceInDays(
-          parseISO(parentTask.dueDate),
-          parseISO(parentTask.startAfter)
-        );
-        instanceStartAfter = toLocalISO(addDays(current, -gap));
-      } else {
-        // Default: instance can only be scheduled on its due day
-        // (start of day — the scheduler will find profile slots from here)
-        const dayStart = new Date(current);
-        dayStart.setHours(0, 0, 0, 0);
-        instanceStartAfter = toLocalISO(dayStart);
-      }
+    const startAfter = leadMinutes !== null ? addMinutes(due, -leadMinutes) : startOfDay(occurrence);
+    const stamp = toLocalISO(new Date());
 
-      const instance: Task = {
-        ...parentTask,
-        id: uuidv4(),
-        isRepeatingInstance: true,
-        parentRepeatingId: parentTask.id,
-        repeatingRule: null, // instances don't repeat
-        dueDate: toLocalISO(current),
-        startAfter: instanceStartAfter,
-        // Always copy the latest schedulingHoursId and all relevant scheduling fields
-        schedulingHoursId: parentTask.schedulingHoursId || null,
-        priority: parentTask.priority,
-        splittable: parentTask.splittable,
-        minBlockDuration: parentTask.minBlockDuration,
-        autoSchedule: parentTask.autoSchedule,
-        color: parentTask.color,
-        listId: parentTask.listId,
-        // Reset completion/progress
-        completed: false,
-        completedAt: null,
-        progress: 0,
-        scheduledBlocks: [],
-        createdAt: toLocalISO(new Date()),
-        updatedAt: toLocalISO(new Date()),
-      };
-      newInstances.push(instance);
-    }
-
-    occurrenceCount++;
-    current = getNextOccurrence(current, rule);
+    created.push({
+      ...parentTask,
+      id: uuidv4(),
+      isRepeatingInstance: true,
+      parentRepeatingId: parentTask.id,
+      repeatingRule: null,
+      dueDate: toLocalISO(due),
+      startAfter: toLocalISO(startAfter),
+      completed: false,
+      completedAt: null,
+      progress: 0,
+      scheduledBlocks: [],
+      schedulingBlocked: false,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
+    existingDays.add(dayKey);
+    upcoming++;
   }
 
-  return newInstances;
+  return created;
 }
 
 // ============================================================
-// Generate event instances from a repeating parent
+// Events
 // ============================================================
+
+export function repeatSeriesKey(parentEventId: string): string {
+  return `repeat-${parentEventId}`;
+}
 
 export function generateRepeatingEventInstances(
   parentEvent: CalendarEvent,
-  existingEvents: CalendarEvent[],
+  allEvents: CalendarEvent[],
   cutoff: Date,
-  maxUpcoming: number = 3
+  maxUpcoming: number = 3,
+  now: Date = new Date()
 ): CalendarEvent[] {
-  if (!parentEvent.repeatingRule) return [];
-
   const rule = parentEvent.repeatingRule;
-  const baseStart = parseISO(parentEvent.startTime);
+  if (!rule) return [];
+
+  const base = parseISO(parentEvent.startTime);
   const baseEnd = parseISO(parentEvent.endTime);
-  const durationMinutes = differenceInMinutes(baseEnd, baseStart);
+  if (isNaN(base.getTime()) || isNaN(baseEnd.getTime())) return [];
+  const duration = Math.max(0, differenceInMinutes(baseEnd, base));
 
-  const existingStartDates = new Set(
-    existingEvents
-      .filter((e) => e.externalId === `repeat-${parentEvent.id}`)
-      .map((e) => e.startTime.slice(0, 10))
-  );
+  const { endDate, maxCount, exceptions } = ruleLimits(rule);
+  const seriesKey = repeatSeriesKey(parentEvent.id);
+  const series = allEvents.filter((e) => e.externalId === seriesKey);
+  // The parent event is itself the first occurrence.
+  const existingDays = new Set([parentEvent.startTime.slice(0, 10), ...series.map((e) => e.startTime.slice(0, 10))]);
+  let upcoming = series.filter((e) => !isBefore(parseISO(e.endTime), now)).length;
 
-  // Count existing uncompleted future instances
-  const now = new Date();
-  const existingFutureCount = existingEvents.filter(
-    (e) =>
-      e.externalId === `repeat-${parentEvent.id}` &&
-      !isBefore(parseISO(e.startTime), now)
-  ).length;
+  const created: CalendarEvent[] = [];
+  let index = 1;
 
-  const needed = Math.max(0, maxUpcoming - existingFutureCount);
-  if (needed === 0) return [];
+  for (const start of occurrences(base, rule, false)) {
+    index++;
+    if (index > maxCount || !isBefore(start, cutoff) || upcoming >= maxUpcoming) break;
+    if (endDate && isAfter(start, endDate)) break;
 
-  const newInstances: CalendarEvent[] = [];
-  let occurrenceCount = 0;
-  const maxOccurrences = rule.count || 365;
-  let current = baseStart;
+    const end = addMinutes(start, duration);
+    if (!isAfter(end, now)) continue;
 
-  current = getNextOccurrence(current, rule);
+    const dayKey = format(start, 'yyyy-MM-dd');
+    if (exceptions.has(dayKey) || existingDays.has(dayKey)) continue;
 
-  while (
-    isBefore(current, cutoff) &&
-    occurrenceCount < maxOccurrences &&
-    newInstances.length < needed
-  ) {
-    if (rule.endDate && isAfter(current, parseISO(rule.endDate))) break;
-
-    const dateKey = format(current, 'yyyy-MM-dd');
-
-    if (!existingStartDates.has(dateKey)) {
-      const instanceStart = new Date(current);
-      instanceStart.setHours(baseStart.getHours(), baseStart.getMinutes(), 0, 0);
-      const instanceEnd = new Date(instanceStart);
-      instanceEnd.setMinutes(instanceEnd.getMinutes() + durationMinutes);
-
-      const instance: CalendarEvent = {
-        ...parentEvent,
-        id: uuidv4(),
-        startTime: toLocalISO(instanceStart),
-        endTime: toLocalISO(instanceEnd),
-        repeatingRule: null,
-        externalId: `repeat-${parentEvent.id}`,
-        createdAt: toLocalISO(new Date()),
-        updatedAt: toLocalISO(new Date()),
-      };
-      newInstances.push(instance);
-    }
-
-    occurrenceCount++;
-    current = getNextOccurrence(current, rule);
+    const stamp = toLocalISO(new Date());
+    created.push({
+      ...parentEvent,
+      id: uuidv4(),
+      startTime: toLocalISO(start),
+      endTime: toLocalISO(end),
+      repeatingRule: null,
+      externalId: seriesKey,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
+    existingDays.add(dayKey);
+    upcoming++;
   }
 
-  return newInstances;
-}
-
-// ============================================================
-// Date advancement based on repeating rule
-// ============================================================
-
-function getNextOccurrence(current: Date, rule: RepeatingRule): Date {
-  const interval = rule.interval || 1;
-
-  switch (rule.frequency) {
-    case RepeatFrequency.Daily:
-      return addDays(current, interval);
-
-    case RepeatFrequency.Weekly:
-      if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
-        // For weekly with interval, we must respect the interval cycle.
-        // First try remaining matching days in the current week.
-        const sortedDays = [...rule.daysOfWeek].sort((a, b) => a - b);
-        const currentDay = current.getDay();
-        
-        // Find the next matching day in the SAME week (after current day)
-        const nextInSameWeek = sortedDays.find((d) => d > currentDay);
-        if (nextInSameWeek !== undefined) {
-          return addDays(current, nextInSameWeek - currentDay);
-        }
-        
-        // No more matching days this week — jump forward by `interval` weeks
-        // to the first matching day of that target week
-        const daysUntilWeekEnd = 7 - currentDay; // days to get to Sunday (0)
-        const firstMatchDay = sortedDays[0];
-        const daysToJump = daysUntilWeekEnd + (interval - 1) * 7 + firstMatchDay;
-        return addDays(current, daysToJump);
-      }
-      return addWeeks(current, interval);
-
-    case RepeatFrequency.Biweekly:
-      return addWeeks(current, 2 * interval);
-
-    case RepeatFrequency.Monthly:
-      if (rule.dayOfMonth) {
-        const next = addMonths(current, interval);
-        next.setDate(Math.min(rule.dayOfMonth, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
-        return next;
-      }
-      return addMonths(current, interval);
-
-    case RepeatFrequency.Yearly:
-      return addYears(current, interval);
-
-    case RepeatFrequency.Custom:
-      return addDays(current, interval);
-
-    default:
-      return addDays(current, 1);
-  }
+  return created;
 }

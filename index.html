@@ -1,49 +1,912 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#2E3440" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Muse — stop playing Tetris with your calendar</title>
+    <meta name="description" content="Muse is a free planner that fits your tasks into your free time — by deadline, priority and dependencies — and re-plans the moment your day changes. Private, open source, works offline." />
+    <meta name="theme-color" content="#12151b" />
+    <link rel="canonical" href="https://muse-in.web.app/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Muse — stop playing Tetris with your calendar" />
+    <meta property="og:description" content="A free planner that fits your tasks into your free time and re-plans when your day changes." />
+    <meta property="og:url" content="https://muse-in.web.app/" />
+    <meta property="og:image" content="https://muse-in.web.app/icon-256.png" />
+    <meta name="twitter:card" content="summary" />
+
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png" />
-    <link rel="icon" href="/icon-16.png" sizes="16x16" type="image/png" />
-    <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon-256.png" />
-    <title>muse — autonomous task scheduler</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
     <style>
-      html, body, #root {
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: #2E3440;
-        color: #ECEFF4;
-        font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      /* ============================================================
+         Muse landing — one deliberate dark look (the product's own
+         Nord palette, deepened for contrast). Frost blue is used for
+         fills and marks, never as running-text color.
+         ============================================================ */
+      :root {
+        color-scheme: dark;
+        --bg: #12151b;
+        --bg-alt: #161a21;
+        --surface: #1c212b;
+        --surface-2: #242a36;
+        --line: #2c3341;
+        --line-2: #3a4252;
+        --text: #eef1f6;
+        --text-2: #c9d1dd;
+        --muted: #9ba6b8;
+        --frost: #88c0d0;
+        --frost-2: #8fbcbb;
+        --frost-ink: #0e1217;
+        --blue: #81a1c1;
+        --green: #a3be8c;
+        --orange: #d08770;
+        --red: #bf616a;
+        --yellow: #ebcb8b;
+        --purple: #b48ead;
+
+        --display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+        --body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+        --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+        --gutter: clamp(16px, 4vw, 40px);
+        --section: clamp(88px, 12vw, 160px);
       }
-      #root {
-        zoom: 1.2;
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { scroll-behavior: smooth; }
+      body {
+        background: var(--bg);
+        color: var(--text-2);
+        font-family: var(--body);
+        font-size: 18px;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
       }
-      /* On mobile / non-Electron browsers, remove zoom */
-      @media (max-width: 768px) {
-        #root {
-          zoom: 1;
-        }
+      a { color: inherit; text-decoration: none; }
+      img, svg { display: block; max-width: 100%; }
+      ::selection { background: var(--frost); color: var(--frost-ink); }
+      :focus-visible { outline: 2px solid var(--frost); outline-offset: 3px; }
+
+      h1, h2, h3 { font-family: var(--display); color: var(--text); text-wrap: balance; letter-spacing: -0.02em; }
+      p { text-wrap: pretty; }
+
+      .wrap { max-width: 1200px; margin: 0 auto; padding-inline: var(--gutter); }
+
+      .label {
+        font-family: var(--mono);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
       }
-      /* Terminal-style scrollbar */
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: var(--scrollbar-track, #2E3440); }
-      ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, #4C566A); border-radius: 0; }
-      ::-webkit-scrollbar-thumb:hover { background: var(--muse-border-light, #5a657a); }
-      ::-webkit-scrollbar-corner { background: var(--scrollbar-track, #2E3440); }
+
+      /* A word styled as a scheduled block — the page's recurring mark. */
+      .block-mark {
+        display: inline-block;
+        padding: 0 0.22em 0.04em;
+        background: var(--frost);
+        color: var(--frost-ink);
+        box-shadow: inset 0.14em 0 0 #5e81ac;
+        line-height: 1.05;
+      }
+
+      /* ---- Buttons ---- */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        min-height: 48px;
+        padding: 12px 22px;
+        font-family: var(--mono);
+        font-size: 15px;
+        font-weight: 600;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+      }
+      .btn:active { transform: translateY(1px); }
+      .btn-primary { background: var(--frost); border-color: var(--frost); color: var(--frost-ink); }
+      .btn-primary:hover { background: var(--frost-2); border-color: var(--frost-2); }
+      .btn-ghost { border-color: var(--line-2); color: var(--text); background: transparent; }
+      .btn-ghost:hover { border-color: var(--frost); }
+      .btn-small { min-height: 38px; padding: 8px 14px; font-size: 13px; }
+
+      /* ---- Nav ---- */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: rgba(18, 21, 27, 0.86);
+        backdrop-filter: saturate(140%) blur(10px);
+        border-bottom: 1px solid var(--line);
+      }
+      .nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 68px; }
+      .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 17px; color: var(--text); letter-spacing: 0.04em; }
+      .brand img { width: 28px; height: 28px; }
+      .nav-links { display: flex; gap: 32px; font-size: 15px; color: var(--text-2); }
+      .nav-links a:hover { color: var(--text); }
+      .nav-cta { display: flex; gap: 10px; }
+      @media (max-width: 860px) { .nav-links { display: none; } }
+      @media (max-width: 520px) { .nav-cta .btn-ghost { display: none; } }
+
+      /* ---- Hero ---- */
+      .hero { padding-block: clamp(64px, 9vw, 120px) clamp(48px, 6vw, 80px); position: relative; overflow: hidden; }
+      .hero::before {
+        content: '';
+        position: absolute;
+        inset: -30% -10% auto auto;
+        width: 720px;
+        height: 720px;
+        background: radial-gradient(closest-side, rgba(136, 192, 208, 0.14), transparent);
+        pointer-events: none;
+      }
+      .hero-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: clamp(32px, 5vw, 72px); align-items: start; }
+      @media (max-width: 960px) { .hero-grid { grid-template-columns: 1fr; } }
+      .hero-title { grid-column: 1 / -1; }
+      .hero h1 { font-size: clamp(44px, 7.6vw, 112px); line-height: 0.96; font-weight: 800; max-width: 12.5em; }
+      .hero-sub { font-size: clamp(18px, 1.6vw, 21px); color: var(--text-2); max-width: 34em; }
+      .hero-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+      .hero-facts { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 28px; font-family: var(--mono); font-size: 14px; color: var(--text-2); }
+      .hero-facts span { display: inline-flex; align-items: center; gap: 8px; }
+      .hero-facts i { width: 8px; height: 8px; background: var(--green); display: inline-block; }
+
+      .hero-aside { border-left: 1px solid var(--line-2); padding-left: 28px; display: grid; gap: 18px; }
+      @media (max-width: 960px) { .hero-aside { border-left: 0; padding-left: 0; border-top: 1px solid var(--line-2); padding-top: 24px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
+      .aside-item b { display: block; font-family: var(--display); font-size: 21px; color: var(--text); font-weight: 700; margin-bottom: 4px; }
+      .aside-item p { font-size: 16px; color: var(--muted); line-height: 1.55; }
+
+      /* ---- Live planner demo ---- */
+      .demo-section { padding-bottom: clamp(56px, 7vw, 96px); }
+      .demo {
+        border: 1px solid var(--line-2);
+        background: var(--surface);
+        box-shadow: 10px 10px 0 #0b0d11;
+      }
+      .demo-bar {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+        padding: 14px 18px; border-bottom: 1px solid var(--line);
+      }
+      .demo-title { font-family: var(--mono); font-size: 14px; color: var(--text); font-weight: 600; }
+      .demo-title span { color: var(--muted); font-weight: 400; }
+      .demo-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .seg { display: inline-flex; border: 1px solid var(--line-2); }
+      .seg button {
+        font-family: var(--mono); font-size: 13px; font-weight: 600; padding: 8px 12px; min-height: 38px;
+        background: transparent; color: var(--text-2); border: 0; cursor: pointer;
+      }
+      .seg button + button { border-left: 1px solid var(--line-2); }
+      .seg button[aria-pressed="true"] { background: var(--frost); color: var(--frost-ink); }
+
+      .demo-body { display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+      @media (max-width: 900px) { .demo-body { grid-template-columns: 1fr; } }
+
+      .queue { border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+      @media (max-width: 900px) { .queue { border-right: 0; border-bottom: 1px solid var(--line); } }
+      .queue-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+      .task-card {
+        display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 10px; align-items: start;
+        padding: 10px 12px; background: var(--surface-2); border-left: 3px solid var(--green);
+        transition: border-color 0.3s ease;
+      }
+      .task-card[data-state="tight"] { border-left-color: var(--orange); }
+      .task-card[data-state="risk"] { border-left-color: var(--red); }
+      .task-rank { font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 2px; }
+      .task-name { font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.35; }
+      .task-meta { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+      .task-meta .pri-high { color: #e8a0a7; }
+      .task-meta .pri-med { color: var(--yellow); }
+      .task-meta .dep { color: var(--frost); }
+      .task-meta .status-risk { color: #e8a0a7; }
+      .task-meta .status-tight { color: #e6ab98; }
+
+      .board-wrap { overflow-x: auto; }
+      .board { min-width: 640px; display: grid; grid-template-columns: 52px repeat(5, minmax(0, 1fr)); }
+      .board-head { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text-2); text-align: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+      .board-head small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+      .gutter { position: relative; border-right: 1px solid var(--line); }
+      .gutter span { position: absolute; right: 8px; transform: translateY(-50%); font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .day { position: relative; border-right: 1px solid var(--line); background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px); }
+      .day:last-child { border-right: 0; }
+      .item {
+        position: absolute; left: 4px; right: 4px; padding: 4px 7px; overflow: hidden;
+        font-size: 12px; line-height: 1.3; font-weight: 600;
+      }
+      .item small { display: block; font-family: var(--mono); font-weight: 400; font-size: 10.5px; opacity: 0.85; }
+      .item.event { background: #2b3242; color: var(--text-2); border-left: 3px solid var(--blue); }
+      .item.task { color: var(--text); background: rgba(163, 190, 140, 0.2); border-left: 3px solid var(--green); }
+      .item.task.tight { background: rgba(208, 135, 112, 0.22); border-left-color: var(--orange); }
+      .item.task.risk { background: rgba(191, 97, 106, 0.25); border-left-color: var(--red); }
+      .item.new { animation: slot-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+      @keyframes slot-in { from { transform: translateY(-10px) scale(0.96); opacity: 0.2; } to { transform: none; opacity: 1; } }
+
+      .demo-foot {
+        display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px;
+        padding: 12px 18px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 13px; color: var(--muted);
+      }
+      .legend { display: flex; flex-wrap: wrap; gap: 14px; }
+      .legend span { display: inline-flex; align-items: center; gap: 6px; }
+      .legend i { width: 10px; height: 10px; display: inline-block; }
+      .demo-foot output { color: var(--text-2); }
+
+      /* ---- Sections ---- */
+      section.block { padding-block: var(--section); border-top: 1px solid var(--line); }
+      section.alt { background: var(--bg-alt); }
+      .section-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 64px; align-items: end; margin-bottom: clamp(40px, 6vw, 72px); }
+      @media (max-width: 860px) { .section-head { grid-template-columns: 1fr; } }
+      .section-head h2 { font-size: clamp(34px, 5vw, 64px); line-height: 1.02; font-weight: 800; margin-top: 14px; }
+      .section-head p { font-size: 19px; color: var(--text-2); max-width: 34em; }
+
+      /* ---- Decision order ---- */
+      .order { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line-2); }
+      @media (max-width: 960px) { .order { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 560px) { .order { grid-template-columns: 1fr; } }
+      .order li { list-style: none; padding: 32px 28px 36px; border-right: 1px solid var(--line-2); position: relative; background: var(--surface); }
+      .order li:last-child { border-right: 0; }
+      @media (max-width: 960px) {
+        .order li:nth-child(2n) { border-right: 0; }
+        .order li:nth-child(-n + 2) { border-bottom: 1px solid var(--line-2); }
+      }
+      @media (max-width: 560px) { .order li { border-right: 0; border-bottom: 1px solid var(--line-2); } .order li:last-child { border-bottom: 0; } }
+      .order .num { font-family: var(--display); font-size: 72px; line-height: 1; font-weight: 800; color: var(--line-2); }
+      .order h3 { font-size: 24px; margin: 18px 0 10px; }
+      .order p { font-size: 16.5px; color: var(--text-2); }
+      .order .swatch { position: absolute; top: 32px; right: 28px; width: 14px; height: 14px; }
+      .rule-note {
+        margin-top: 24px; display: flex; gap: 14px; align-items: flex-start;
+        padding: 20px 24px; border: 1px solid var(--line-2); background: var(--surface); font-size: 17px;
+      }
+      .rule-note b { color: var(--text); }
+      .rule-note .tag { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 3px 8px; background: var(--frost); color: var(--frost-ink); white-space: nowrap; margin-top: 3px; }
+
+      /* ---- Feature bento ---- */
+      .bento { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
+      .cell { background: var(--surface); border: 1px solid var(--line); padding: 28px; display: flex; flex-direction: column; gap: 14px; min-height: 260px; }
+      .cell h3 { font-size: 24px; line-height: 1.15; font-weight: 700; }
+      .cell p { font-size: 16.5px; color: var(--text-2); }
+      .cell .viz { margin-top: auto; }
+      .span-3 { grid-column: span 3; }
+      .span-2 { grid-column: span 2; }
+      .span-4 { grid-column: span 4; }
+      @media (max-width: 960px) { .span-3, .span-2, .span-4 { grid-column: span 3; } }
+      @media (max-width: 640px) { .bento { grid-template-columns: 1fr; } .span-3, .span-2, .span-4 { grid-column: auto; } }
+
+      /* mini visuals */
+      .split-viz { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .split-viz div { display: flex; flex-direction: column; gap: 4px; }
+      .split-viz b { height: 22px; background: rgba(163, 190, 140, 0.25); border-left: 3px solid var(--green); }
+      .split-viz b.gap { background: transparent; border: 1px dashed var(--line-2); }
+      .chain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 13px; }
+      .chain span { padding: 8px 12px; background: var(--surface-2); color: var(--text); border-left: 3px solid var(--frost); }
+      .chain em { font-style: normal; color: var(--muted); }
+      .hours { display: grid; grid-template-columns: 30px repeat(24, 1fr); gap: 2px; font-family: var(--mono); font-size: 10px; color: var(--muted); align-items: center; }
+      .hours i { height: 12px; background: var(--surface-2); }
+      .hours i.on { background: var(--frost); }
+      .hours i.deep { background: var(--purple); }
+      .buffer-viz { display: grid; grid-template-rows: 26px 44px 26px; font-family: var(--mono); font-size: 12px; }
+      .buffer-viz div { display: flex; align-items: center; padding-left: 10px; }
+      .buffer-viz .buf { background: repeating-linear-gradient(-45deg, transparent 0 6px, rgba(129, 161, 193, 0.16) 6px 12px); }
+      .buffer-viz .buf span { background: var(--surface); color: var(--text-2); padding: 1px 6px; }
+      .hours-legend { display: flex; gap: 14px; margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+      .hours-legend span { display: inline-flex; align-items: center; gap: 6px; }
+      .hours-legend i { width: 10px; height: 10px; display: inline-block; }
+      .habit-viz { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; font-family: var(--mono); font-size: 11px; text-align: center; color: var(--muted); }
+      .habit-viz b { display: grid; place-items: center; height: 34px; margin-top: 4px; font-size: 14px; font-weight: 700; }
+      .habit-viz .done b { background: rgba(163, 190, 140, 0.22); color: var(--green); }
+      .habit-viz .missed b { background: rgba(191, 97, 106, 0.22); color: #e8a0a7; }
+      .habit-viz .skipped b { border: 1px dashed var(--line-2); color: var(--muted); }
+      .habit-viz .next b { background: var(--frost); color: var(--frost-ink); }
+      .habit-viz .later b { background: var(--surface-2); color: var(--muted); }
+      .pin-viz { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: center; font-family: var(--mono); font-size: 12px; }
+      .pin-viz .col { display: grid; gap: 6px; }
+      .pin-viz .t { padding: 7px 10px; background: rgba(163, 190, 140, 0.2); border-left: 3px solid var(--green); color: var(--text); }
+      .pin-viz .t.pinned { background: var(--frost); color: var(--frost-ink); border-left-color: #5e81ac; font-weight: 700; }
+      .pin-viz em { font-style: normal; color: var(--muted); font-size: 18px; }
+      .buffer-viz .ev { background: #2b3242; border-left: 3px solid var(--blue); color: var(--text); font-weight: 600; }
+      .states { display: grid; gap: 8px; font-size: 15px; }
+      .states div { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); }
+      .states i { width: 12px; height: 12px; flex-shrink: 0; }
+      .states b { color: var(--text); font-weight: 600; min-width: 5.5em; }
+      .kbd-viz { display: flex; gap: 8px; align-items: center; font-family: var(--mono); }
+      .kbd-viz kbd { font-family: var(--mono); font-size: 18px; font-weight: 600; min-width: 48px; padding: 10px 12px; text-align: center; background: var(--surface-2); border: 1px solid var(--line-2); border-bottom-width: 3px; color: var(--text); }
+      .kbd-viz span { color: var(--muted); font-size: 15px; }
+      .sync-viz { display: flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 13px; color: var(--text-2); }
+      .sync-viz span { padding: 10px 14px; border: 1px solid var(--line-2); background: var(--surface-2); }
+      .sync-viz em { font-style: normal; color: var(--frost); font-size: 18px; }
+
+      /* ---- Comparison ---- */
+      .cmp-wrap { overflow-x: auto; border: 1px solid var(--line-2); }
+      table.cmp { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 17px; }
+      .cmp th, .cmp td { text-align: left; padding: 20px 24px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      .cmp thead th { background: var(--surface); font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+      .cmp thead th.us { color: var(--frost-ink); background: var(--frost); }
+      .cmp tbody th { font-weight: 500; color: var(--muted); width: 26%; }
+      .cmp td.us { color: var(--text); font-weight: 600; background: rgba(136, 192, 208, 0.06); }
+      .cmp tr:last-child td, .cmp tr:last-child th { border-bottom: 0; }
+
+      /* ---- Platforms + CTA ---- */
+      .platforms { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+      @media (max-width: 860px) { .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 480px) { .platforms { grid-template-columns: 1fr; } }
+      .platform { padding: 24px; border: 1px solid var(--line); background: var(--surface); }
+      .platform b { display: block; font-family: var(--display); font-size: 22px; color: var(--text); margin-bottom: 6px; }
+      .platform p { font-size: 16px; color: var(--muted); }
+
+      .final { padding-block: var(--section); border-top: 1px solid var(--line); text-align: center; position: relative; overflow: hidden; }
+      .final h2 { font-size: clamp(40px, 7vw, 88px); line-height: 1; font-weight: 800; max-width: 12em; margin: 18px auto 0; }
+      .final p { font-size: 20px; color: var(--text-2); max-width: 30em; margin: 24px auto 0; }
+      .final .hero-ctas { justify-content: center; }
+
+      footer { border-top: 1px solid var(--line); padding-block: 36px; }
+      .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; font-size: 15px; color: var(--muted); }
+      .foot nav { display: flex; gap: 24px; }
+      .foot a:hover { color: var(--text); }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        .item.new { animation: none; }
+        * { transition: none !important; }
+      }
     </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="/" aria-label="Muse home"><img src="/icon.png" alt="" width="28" height="28" />muse</a>
+        <nav class="nav-links" aria-label="Sections">
+          <a href="#demo">Try it</a>
+          <a href="#how">How it decides</a>
+          <a href="#features">Features</a>
+          <a href="#compare">Compare</a>
+        </nav>
+        <div class="nav-cta">
+          <a class="btn btn-ghost btn-small" href="https://github.com/siddhantharsh/Muse" target="_blank" rel="noopener">GitHub</a>
+          <a class="btn btn-primary btn-small" href="/app.html">Open Muse</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- ============ HERO ============ -->
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-title">
+            <p class="label">Free task planner · open source</p>
+            <h1 style="margin-top: 18px">Stop playing Tetris with your <span class="block-mark">calendar</span>.</h1>
+          </div>
+          <div>
+            <p class="hero-sub">
+              Tell Muse what needs doing, how long it takes and when it’s due. It fits every task
+              into your free time — by deadline, priority and what depends on what — and re-plans
+              the moment your day changes.
+            </p>
+            <div class="hero-ctas">
+              <a class="btn btn-primary" href="/app.html">Open Muse — it’s free</a>
+              <a class="btn btn-ghost" href="#demo">Try the planner below</a>
+            </div>
+            <div class="hero-facts">
+              <span><i></i>No account needed</span>
+              <span><i></i>Works offline</span>
+              <span><i></i>Optional sync across devices</span>
+            </div>
+          </div>
+          <div class="hero-aside">
+            <div class="aside-item">
+              <b>It explains itself</b>
+              <p>Every block lands where it does for a reason you can read — the same inputs always give the same plan.</p>
+            </div>
+            <div class="aside-item">
+              <b>It keeps up</b>
+              <p>Meeting ran long? Unfinished work rolls forward on its own, around everything that’s fixed.</p>
+            </div>
+            <div class="aside-item">
+              <b>It’s yours</b>
+              <p>No subscription. Your schedule stays on your device unless you choose to sync it.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ LIVE DEMO ============ -->
+      <section class="demo-section" id="demo" aria-labelledby="demo-title">
+        <div class="wrap">
+          <div class="demo">
+            <div class="demo-bar">
+              <div class="demo-title" id="demo-title">Your week <span>— a working mini version of the Muse planner</span></div>
+              <div class="demo-controls">
+                <div class="seg" role="group" aria-label="Planning style">
+                  <button type="button" data-mode="balanced" aria-pressed="true">Balanced</button>
+                  <button type="button" data-mode="frontload" aria-pressed="false">Front-load</button>
+                </div>
+                <button type="button" class="btn btn-ghost btn-small" id="add-urgent">+ Urgent bug, due Monday</button>
+                <button type="button" class="btn btn-ghost btn-small" id="reset-demo">Reset</button>
+              </div>
+            </div>
+            <div class="demo-body">
+              <div class="queue" aria-live="polite">
+                <div class="queue-head">
+                  <span class="label">Planning order</span>
+                </div>
+                <div id="queue"></div>
+              </div>
+              <div class="board-wrap">
+                <div class="board" id="board" role="img" aria-label="Week calendar showing meetings and planned task blocks"></div>
+              </div>
+            </div>
+            <div class="demo-foot">
+              <div class="legend">
+                <span><i style="background: var(--green)"></i>On track</span>
+                <span><i style="background: var(--orange)"></i>Tight</span>
+                <span><i style="background: var(--red)"></i>Won’t fit</span>
+                <span><i style="background: #2b3242; border-left: 3px solid var(--blue)"></i>Meeting (fixed)</span>
+              </div>
+              <output id="stats">Planning…</output>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ HOW IT DECIDES ============ -->
+      <section class="block alt" id="how" aria-labelledby="how-title">
+        <div class="wrap">
+          <div class="section-head">
+            <div>
+              <p class="label">How it decides</p>
+              <h2 id="how-title">Four questions, asked in the same order every time.</h2>
+            </div>
+            <p>
+              When two tasks want the same hour, Muse doesn’t guess. It ranks them with a fixed
+              order of questions, then fills your free time from the top of the list down.
+            </p>
+          </div>
+
+          <ol class="order">
+            <li>
+              <span class="swatch" style="background: var(--red)" aria-hidden="true"></span>
+              <div class="num">01</div>
+              <h3>Is it at risk?</h3>
+              <p>Anything that can’t fit before its deadline — or is already late — jumps the queue.</p>
+            </li>
+            <li>
+              <span class="swatch" style="background: var(--yellow)" aria-hidden="true"></span>
+              <div class="num">02</div>
+              <h3>How important?</h3>
+              <p>Your priority decides the rest: high before medium before low.</p>
+            </li>
+            <li>
+              <span class="swatch" style="background: var(--frost)" aria-hidden="true"></span>
+              <div class="num">03</div>
+              <h3>Which is due first?</h3>
+              <p>Among equals, the earlier deadline gets the earlier slot.</p>
+            </li>
+            <li>
+              <span class="swatch" style="background: var(--green)" aria-hidden="true"></span>
+              <div class="num">04</div>
+              <h3>Which is shorter?</h3>
+              <p>Short tasks go first so the long ones can use the big gaps.</p>
+            </li>
+          </ol>
+          <div class="rule-note">
+            <span class="tag">ALWAYS</span>
+            <p>
+              <b>Dependencies come before all four.</b> A task that waits on another is never
+              scheduled before it — no matter how urgent it looks.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ FEATURES ============ -->
+      <section class="block" id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <div class="section-head">
+            <div>
+              <p class="label">What’s in the box</p>
+              <h2 id="features-title">Built for how real weeks actually go.</h2>
+            </div>
+            <p>Everything here ships in the app today, for free.</p>
+          </div>
+
+          <div class="bento">
+            <article class="cell span-4">
+              <h3>Long work, split across your gaps</h3>
+              <p>A six-hour report doesn’t need a six-hour hole in your day. Mark it splittable and Muse spreads it across free slots — never in fragments shorter than you allow.</p>
+              <div class="viz split-viz" aria-hidden="true">
+                <div>Mon<b></b><b class="gap"></b></div>
+                <div>Tue<b class="gap"></b><b></b></div>
+                <div>Wed<b></b><b></b></div>
+                <div>Thu<b class="gap"></b><b class="gap"></b></div>
+                <div>Fri<b></b><b class="gap"></b></div>
+              </div>
+            </article>
+
+            <article class="cell span-2">
+              <h3>Colors that mean something</h3>
+              <div class="viz states">
+                <div><i style="background: var(--green)"></i><b>On track</b>room to spare</div>
+                <div><i style="background: var(--orange)"></i><b>Tight</b>little slack left</div>
+                <div><i style="background: var(--red)"></i><b>At risk</b>late or won’t fit</div>
+              </div>
+            </article>
+
+            <article class="cell span-2">
+              <h3>Knows what comes first</h3>
+              <p>Link tasks and Muse keeps the order, finish to start.</p>
+              <div class="viz chain" aria-hidden="true">
+                <span>Research</span><em>→</em><span>Draft</span><em>→</em><span>Send</span>
+              </div>
+            </article>
+
+            <article class="cell span-2">
+              <h3>Your hours, your rules</h3>
+              <p>Work only inside the windows you choose — like weekdays 9–5, or early “deep work” mornings.</p>
+              <div class="viz">
+                <div class="hours" aria-hidden="true" id="hours-viz"></div>
+                <div class="hours-legend">
+                  <span><i style="background: var(--frost)"></i>Work hours</span>
+                  <span><i style="background: var(--purple)"></i>Deep work</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="cell span-2">
+              <h3>Room around meetings</h3>
+              <p>Add travel or wind-down time before and after any event. Nothing gets scheduled there.</p>
+              <div class="viz buffer-viz" aria-hidden="true">
+                <div class="buf"><span>15 min before</span></div>
+                <div class="ev">Client call · 14:00</div>
+                <div class="buf"><span>15 min after</span></div>
+              </div>
+            </article>
+
+            <article class="cell span-3">
+              <h3>Habits that don’t pile up</h3>
+              <p>Daily, weekly or monthly tasks land on their own day. Missed one? It waits in <em>Missed</em> for a decision — or skips itself, if you’d rather. Nothing stacks onto today.</p>
+              <div class="viz habit-viz" aria-hidden="true">
+                <div class="done">Mon<b>✓</b></div>
+                <div class="done">Tue<b>✓</b></div>
+                <div class="missed">Wed<b>!</b></div>
+                <div class="skipped">Thu<b>–</b></div>
+                <div class="next">Fri<b>●</b></div>
+                <div class="later">Sat<b>·</b></div>
+                <div class="later">Sun<b>·</b></div>
+              </div>
+            </article>
+
+            <article class="cell span-3">
+              <h3>Drag to pin, everything else adapts</h3>
+              <p>Drop any block at an exact time to fix it there. The rest of the plan re-flows around it instantly.</p>
+              <div class="viz pin-viz" aria-hidden="true">
+                <div class="col"><span class="t">Write report</span><span class="t">Review PRs</span><span class="t">Gym</span></div>
+                <em>→</em>
+                <div class="col"><span class="t pinned">Gym · pinned 07:00</span><span class="t">Write report</span><span class="t">Review PRs</span></div>
+              </div>
+            </article>
+
+            <article class="cell span-2">
+              <h3>Keyboard-first</h3>
+              <p>Add a task, jump to any view or re-plan without reaching for the mouse.</p>
+              <div class="viz kbd-viz" aria-hidden="true"><kbd>Ctrl</kbd><kbd>K</kbd><span>do anything</span></div>
+            </article>
+
+            <article class="cell span-4">
+              <h3>Same plan on every screen</h3>
+              <p>Use it without an account, or sign in with your email to keep your laptop, phone and desktop app in sync — changes show up on the others within seconds.</p>
+              <div class="viz sync-viz" aria-hidden="true"><span>laptop</span><em>⇄</em><span>phone</span><em>⇄</em><span>desktop app</span></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ COMPARISON ============ -->
+      <section class="block alt" id="compare" aria-labelledby="compare-title">
+        <div class="wrap">
+          <div class="section-head">
+            <div>
+              <p class="label">Side by side</p>
+              <h2 id="compare-title">How it compares.</h2>
+            </div>
+            <p>How Muse stacks up against the typical paid auto-planner.</p>
+          </div>
+          <div class="cmp-wrap">
+            <table class="cmp">
+              <thead>
+                <tr><th scope="col"><span class="sr-only">Aspect</span></th><th scope="col" class="us">Muse</th><th scope="col">AI-based planners</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">Price</th><td class="us">Free</td><td>Usually a monthly subscription</td></tr>
+                <tr><th scope="row">How it plans</th><td class="us">A fixed, readable set of rules</td><td>A language model’s judgment</td></tr>
+                <tr><th scope="row">Same input twice</th><td class="us">Same plan, every time</td><td>May differ between runs</td></tr>
+                <tr><th scope="row">Your data</th><td class="us">On your device; sync is optional</td><td>Often processed in the cloud</td></tr>
+                <tr><th scope="row">Source code</th><td class="us">Open (MIT)</td><td>Usually closed</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PLATFORMS ============ -->
+      <section class="block" aria-labelledby="platforms-title">
+        <div class="wrap">
+          <div class="section-head">
+            <div>
+              <p class="label">Where it runs</p>
+              <h2 id="platforms-title">Wherever you plan.</h2>
+            </div>
+            <p>Install it on as many devices as you like. Sign in with the same email and they all show the same week.</p>
+          </div>
+          <div class="platforms">
+            <div class="platform"><b>Web</b><p>Runs in any modern browser. Install it as an app from the address bar.</p></div>
+            <div class="platform"><b>Linux</b><p>Desktop app as .deb or AppImage.</p></div>
+            <div class="platform"><b>Windows</b><p>Desktop app with a standard installer.</p></div>
+            <div class="platform"><b>Android</b><p>Lightweight app that opens your planner full-screen.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ FINAL CTA ============ -->
+      <section class="final" aria-labelledby="final-title">
+        <div class="wrap">
+          <p class="label">Two minutes to set up</p>
+          <h2 id="final-title">Hand Muse your list. Get your week back.</h2>
+          <p>Add a few tasks, set when they’re due, and watch them find their place.</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="/app.html">Open Muse</a>
+            <a class="btn btn-ghost" href="https://github.com/siddhantharsh/Muse" target="_blank" rel="noopener">Read the source</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap foot">
+        <span>© <span id="year">2026</span> Muse · MIT licensed</span>
+        <nav aria-label="Footer">
+          <a href="/app.html">Open app</a>
+          <a href="https://github.com/siddhantharsh/Muse" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/siddhantharsh/Muse#readme" target="_blank" rel="noopener">Docs</a>
+        </nav>
+      </div>
+    </footer>
+
+    <style>
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    </style>
+
+    <script>
+      document.getElementById('year').textContent = new Date().getFullYear();
+
+      // ---- "Your hours" mini grid: weekday 9–17 work, early deep-work mornings ----
+      (function hoursGrid() {
+        var el = document.getElementById('hours-viz');
+        var days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        var html = '';
+        days.forEach(function (d, i) {
+          html += '<span>' + d + '</span>';
+          for (var h = 0; h < 24; h++) {
+            var cls = '';
+            if (i < 5 && h >= 9 && h < 17) cls = 'on';
+            if (i < 3 && h >= 6 && h < 9) cls = 'deep';
+            html += '<i class="' + cls + '"></i>';
+          }
+        });
+        el.innerHTML = html;
+      })();
+
+      // ============================================================
+      // Mini planner — a small, faithful model of Muse's rules:
+      // dependencies first; then at-risk, priority, deadline, length;
+      // balanced mode spreads each task toward its deadline.
+      // ============================================================
+      (function planner() {
+        var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        var START = 9, END = 18, STEP = 30;              // hours shown, slot size (min)
+        var SLOTS = ((END - START) * 60) / STEP;          // 18 slots per day
+        var ROW = 26;                                     // px per 30-min slot
+        var PRI = { high: 3, med: 2, low: 1, none: 0 };
+
+        var EVENTS = [
+          { title: 'Team sync', day: 0, start: '10:00', end: '11:00' },
+          { title: 'Lunch', day: 1, start: '12:30', end: '13:30' },
+          { title: 'Client call', day: 1, start: '14:00', end: '15:30' },
+          { title: 'Standup', day: 2, start: '09:00', end: '09:30' },
+          { title: 'Design review', day: 2, start: '15:00', end: '16:30' },
+          { title: '1:1', day: 3, start: '11:00', end: '11:30' },
+          { title: 'Offsite', day: 4, start: '13:00', end: '17:00' },
+        ];
+        var BASE_TASKS = [
+          { id: 'plan', title: 'Plan the sprint', mins: 60, pri: 'high', due: 0, split: false },
+          { id: 'prs', title: 'Review pull requests', mins: 90, pri: 'med', due: 1, split: true, min: 30 },
+          { id: 'draft', title: 'Draft the proposal', mins: 240, pri: 'high', due: 2, split: true, min: 60 },
+          { id: 'slides', title: 'Build the slides', mins: 120, pri: 'med', due: 3, split: true, min: 60, deps: ['draft'] },
+          { id: 'docs', title: 'Write the docs', mins: 240, pri: 'low', due: 4, split: true, min: 60 },
+          { id: 'inbox', title: 'Clear the inbox', mins: 30, pri: 'none', due: 4, split: false },
+        ];
+        var URGENT = { id: 'bug', title: 'Fix the checkout bug', mins: 150, pri: 'high', due: 0, split: true, min: 30 };
+
+        var state = { mode: 'balanced', tasks: BASE_TASKS.slice(), animate: false };
+        var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function toSlot(t) { var p = t.split(':'); return ((+p[0] - START) * 60 + +p[1]) / STEP; }
+        function fmt(slot) {
+          var m = START * 60 + slot * STEP;
+          return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+        }
+        function freeSlotsBefore(busy, day, fromDay) {
+          var n = 0;
+          for (var d = fromDay; d <= day; d++) for (var s = 0; s < SLOTS; s++) if (!busy[d][s]) n++;
+          return n;
+        }
+
+        function plan() {
+          var t0 = performance.now();
+          var busy = DAYS.map(function () { return new Array(SLOTS).fill(false); });
+          EVENTS.forEach(function (e) { for (var s = toSlot(e.start); s < toSlot(e.end); s++) busy[e.day][s] = true; });
+
+          // Pre-rank: at risk if total free time before its deadline is too small.
+          var tasks = state.tasks.map(function (t) {
+            var need = t.mins / STEP;
+            return Object.assign({}, t, { need: need, risk: freeSlotsBefore(busy, t.due, 0) < need });
+          });
+          var byId = {}; tasks.forEach(function (t) { byId[t.id] = t; });
+          function cmp(a, b) {
+            if (a.risk !== b.risk) return a.risk ? -1 : 1;
+            if (PRI[a.pri] !== PRI[b.pri]) return PRI[b.pri] - PRI[a.pri];
+            if (a.due !== b.due) return a.due - b.due;
+            return a.mins - b.mins;
+          }
+
+          // Dependency-respecting order: pick the best task whose prerequisites are placed.
+          var order = [], done = {};
+          while (order.length < tasks.length) {
+            var ready = tasks.filter(function (t) {
+              return !done[t.id] && (t.deps || []).every(function (d) { return done[d] || !byId[d]; });
+            });
+            if (!ready.length) break;
+            ready.sort(cmp);
+            done[ready[0].id] = true;
+            order.push(ready[0]);
+          }
+
+          var blocks = [], results = {};
+          order.forEach(function (t) {
+            var remaining = t.need;
+            var minRun = t.split ? Math.max(1, (t.min || 30) / STEP) : t.need;
+            // Earliest start: after every prerequisite's last block.
+            var earliest = { day: 0, slot: 0 };
+            (t.deps || []).forEach(function (d) {
+              var r = results[d];
+              if (r && r.end && (r.end.day > earliest.day || (r.end.day === earliest.day && r.end.slot > earliest.slot))) earliest = r.end;
+            });
+            var placed = [];
+            var lastDay = t.risk ? DAYS.length - 1 : Math.max(t.due, earliest.day);
+            for (var d = earliest.day; d < DAYS.length && remaining > 0; d++) {
+              if (d > lastDay && !t.risk) break;
+              // Balanced: spread what's left evenly over the days until the deadline.
+              var cap = remaining;
+              if (state.mode === 'balanced' && !t.risk && t.split) {
+                var daysLeft = Math.max(1, t.due - d + 1);
+                cap = Math.max(minRun, Math.ceil(remaining / daysLeft));
+              }
+              var usedToday = 0;
+              var s = d === earliest.day ? earliest.slot : 0;
+              while (s < SLOTS && remaining > 0 && usedToday < cap) {
+                if (busy[d][s]) { s++; continue; }
+                var run = 0;
+                while (s + run < SLOTS && !busy[d][s + run]) run++;
+                var take = Math.min(run, remaining, cap - usedToday);
+                if (take < Math.min(minRun, remaining)) { s += run; continue; }
+                // Don't leave a leftover shorter than the minimum block.
+                var left = remaining - take;
+                if (left > 0 && left < minRun) take = remaining <= run ? remaining : remaining - minRun;
+                if (take < Math.min(minRun, remaining)) { s += run; continue; }
+                for (var k = 0; k < take; k++) busy[d][s + k] = true;
+                placed.push({ day: d, start: s, len: take });
+                remaining -= take; usedToday += take; s += take;
+              }
+            }
+            var end = placed.length ? placed[placed.length - 1] : null;
+            var fits = remaining === 0 && (!end || end.day <= t.due);
+            var slack = fits ? freeAfter(busy, end, t.due) : 0;
+            var status = !fits ? 'risk' : slack < 2 ? 'tight' : 'ok';
+            results[t.id] = { status: status, end: end ? { day: end.day, slot: end.start + end.len } : null, unplaced: remaining };
+            placed.forEach(function (b) { blocks.push({ task: t, day: b.day, start: b.start, len: b.len, status: status }); });
+          });
+
+          render(order, results, blocks, performance.now() - t0);
+        }
+
+        // Free slots left between a task's last block and the end of its due day.
+        function freeAfter(busy, end, dueDay) {
+          if (!end) return 0;
+          var n = 0;
+          for (var d = end.day; d <= dueDay; d++)
+            for (var s = d === end.day ? end.start + end.len : 0; s < SLOTS; s++) if (!busy[d][s]) n++;
+          return n;
+        }
+
+        function render(order, results, blocks, ms) {
+          var queue = document.getElementById('queue');
+          var priLabel = { high: '<span class="pri-high">high</span>', med: '<span class="pri-med">medium</span>', low: 'low', none: 'no priority' };
+          queue.innerHTML = order.map(function (t, i) {
+            var r = results[t.id];
+            var hrs = t.mins >= 60 ? (t.mins / 60) + 'h' : t.mins + 'm';
+            var status = r.status === 'risk'
+              ? '<span class="status-risk">won’t fit</span>'
+              : r.status === 'tight' ? '<span class="status-tight">tight</span>' : '';
+            var deps = (t.deps || []).length ? '<span class="dep">after draft</span>' : '';
+            return '<div class="task-card" data-state="' + r.status + '">' +
+              '<span class="task-rank">' + String(i + 1).padStart(2, '0') + '</span>' +
+              '<span class="task-name">' + t.title + '</span>' +
+              '<span class="task-meta"><span>' + hrs + '</span><span>due ' + DAYS[t.due] + '</span>' + priLabel[t.pri] + deps + status + '</span>' +
+              '</div>';
+          }).join('');
+
+          var board = document.getElementById('board');
+          var height = SLOTS * ROW;
+          var html = '<div class="board-head"></div>' + DAYS.map(function (d, i) {
+            return '<div class="board-head">' + d + '<small>day ' + (i + 1) + '</small></div>';
+          }).join('');
+          html += '<div class="gutter" style="height:' + height + 'px">';
+          for (var h = START + 1; h < END; h++) html += '<span style="top:' + ((h - START) * 2 * ROW) + 'px">' + h + ':00</span>';
+          html += '</div>';
+          DAYS.forEach(function (_, d) {
+            html += '<div class="day" style="height:' + height + 'px;background-size:100% ' + (ROW * 2) + 'px">';
+            EVENTS.filter(function (e) { return e.day === d; }).forEach(function (e) {
+              var s = toSlot(e.start), n = toSlot(e.end) - s;
+              html += '<div class="item event" style="top:' + (s * ROW + 1) + 'px;height:' + (n * ROW - 2) + 'px">' + e.title + (n > 1 ? '<small>' + e.start + '–' + e.end + '</small>' : '') + '</div>';
+            });
+            blocks.filter(function (b) { return b.day === d; }).forEach(function (b, i) {
+              var cls = 'item task ' + (b.status === 'risk' ? 'risk' : b.status === 'tight' ? 'tight' : '') + (state.animate && !reduceMotion ? ' new' : '');
+              var delay = state.animate ? ' animation-delay:' + (d * 60 + i * 40) + 'ms;' : '';
+              html += '<div class="' + cls + '" style="top:' + (b.start * ROW + 1) + 'px;height:' + (b.len * ROW - 2) + 'px;' + delay + '">' +
+                b.task.title + (b.len > 1 ? '<small>' + fmt(b.start) + '–' + fmt(b.start + b.len) + '</small>' : '') + '</div>';
+            });
+            html += '</div>';
+          });
+          board.innerHTML = html;
+
+          var placedTasks = order.filter(function (t) { return results[t.id].status !== 'risk'; }).length;
+          var atRisk = order.length - placedTasks;
+          document.getElementById('stats').textContent =
+            'Planned ' + placedTasks + ' of ' + order.length + ' tasks' +
+            (atRisk ? ' · ' + atRisk + ' won’t fit' : ' · nothing at risk') +
+            ' · ' + (ms < 1 ? '<1' : Math.round(ms)) + ' ms';
+          state.animate = false;
+        }
+
+        document.querySelectorAll('.seg button').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            state.mode = btn.dataset.mode;
+            document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)); });
+            state.animate = true;
+            plan();
+          });
+        });
+        document.getElementById('add-urgent').addEventListener('click', function () {
+          if (!state.tasks.some(function (t) { return t.id === URGENT.id; })) state.tasks = state.tasks.concat([URGENT]);
+          state.animate = true;
+          plan();
+        });
+        document.getElementById('reset-demo').addEventListener('click', function () {
+          state.tasks = BASE_TASKS.slice();
+          state.animate = true;
+          plan();
+        });
+
+        plan();
+      })();
+    </script>
   </body>
 </html>

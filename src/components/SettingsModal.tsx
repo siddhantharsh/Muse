@@ -24,6 +24,7 @@ import {
   CalendarPlus,
   Shield,
   ArrowLeft,
+  GraduationCap,
 } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
 import {
@@ -33,7 +34,9 @@ import {
   DaySchedule,
   TimeBlock,
 } from '../types';
-import { isCloudConfigured, getCloudUser, cloudSignOut, cloudSignIn, cloudSignUp } from '../utils/cloudSync';
+import { NumberField } from './NumberField';
+import { AuthForm, type AuthMode } from './AuthForm';
+import { getDeviceId } from '../hooks/useCloudSync';
 
 function isElectron(): boolean {
   return !!(window as any).electronAPI;
@@ -59,9 +62,7 @@ export function SettingsModal() {
     { id: 'general' as SectionId, label: 'General', icon: <SettingsIcon size={16} /> },
     { id: 'scheduling' as SectionId, label: 'Scheduling Engine', icon: <Zap size={16} /> },
     { id: 'scheduling-hours' as SectionId, label: 'Scheduling Hours', icon: <Clock size={16} /> },
-    ...(isCloudConfigured()
-      ? [{ id: 'cloud-account' as SectionId, label: 'Cloud Account', icon: <Shield size={16} /> }]
-      : []),
+    { id: 'cloud-account' as SectionId, label: 'Account', icon: <Shield size={16} /> },
     { id: 'calendar-sync' as SectionId, label: 'Calendar Sync', icon: <CalendarPlus size={16} /> },
     { id: 'appearance' as SectionId, label: 'Appearance', icon: <Palette size={16} /> },
     { id: 'notifications' as SectionId, label: 'Notifications', icon: <Bell size={16} /> },
@@ -213,26 +214,42 @@ function GeneralSettings({ settings, updateSettings }: any) {
         </select>
       </SettingRow>
 
-      <SettingRow label="Day start hour" description="Calendar view start time">
-        <input
-          type="number"
-          min={0}
-          max={12}
+      <SettingRow
+        label="Day start hour"
+        description="Where the calendar starts, and the earliest “any time” tasks are scheduled"
+      >
+        <NumberField
           value={settings.dayStartHour}
-          onChange={(e) => updateSettings({ dayStartHour: parseInt(e.target.value) })}
+          min={0}
+          max={Math.max(0, settings.dayEndHour - 1)}
+          onCommit={(dayStartHour) => updateSettings({ dayStartHour })}
+          aria-label="Day start hour"
           className="input-base w-20 text-center"
         />
       </SettingRow>
 
-      <SettingRow label="Day end hour" description="Calendar view end time">
-        <input
-          type="number"
-          min={12}
-          max={24}
+      <SettingRow
+        label="Day end hour"
+        description="Where the calendar ends, and the latest “any time” tasks are scheduled"
+      >
+        <NumberField
           value={settings.dayEndHour}
-          onChange={(e) => updateSettings({ dayEndHour: parseInt(e.target.value) })}
+          min={settings.dayStartHour + 1}
+          max={24}
+          onCommit={(dayEndHour) => updateSettings({ dayEndHour })}
+          aria-label="Day end hour"
           className="input-base w-20 text-center"
         />
+      </SettingRow>
+
+      <SettingRow label="Guided tour" description="Walk through how Muse plans your time">
+        <button
+          onClick={() => useMuseStore.getState().openTutorial()}
+          className="btn-secondary text-xs flex items-center gap-1.5"
+        >
+          <GraduationCap size={12} />
+          Replay tutorial
+        </button>
       </SettingRow>
     </div>
   );
@@ -338,15 +355,13 @@ function SchedulingSettings({ settings, updateSettings }: any) {
 
       <SettingRow label="Default task duration" description="Minutes for new tasks">
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={5}
-            max={480}
-            step={5}
+          <NumberField
             value={settings.defaultTaskDuration}
-            onChange={(e) =>
-              updateSettings({ defaultTaskDuration: parseInt(e.target.value) })
-            }
+            min={5}
+            max={1440}
+            step={5}
+            onCommit={(defaultTaskDuration) => updateSettings({ defaultTaskDuration })}
+            aria-label="Default task duration in minutes"
             className="input-base w-24 text-center"
           />
           <span className="text-xs text-nord3">minutes</span>
@@ -369,15 +384,13 @@ function SchedulingSettings({ settings, updateSettings }: any) {
 
       <SettingRow label="Default min block" description="Minimum block duration for split tasks">
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={5}
-            max={120}
-            step={5}
+          <NumberField
             value={settings.defaultMinBlockDuration}
-            onChange={(e) =>
-              updateSettings({ defaultMinBlockDuration: parseInt(e.target.value) })
-            }
+            min={5}
+            max={480}
+            step={5}
+            onCommit={(defaultMinBlockDuration) => updateSettings({ defaultMinBlockDuration })}
+            aria-label="Default minimum block in minutes"
             className="input-base w-24 text-center"
           />
           <span className="text-xs text-nord3">minutes</span>
@@ -596,203 +609,104 @@ function SchedulingHoursSettings({
   );
 }
 
-// ---- Cloud Account Settings ----
+// ---- Account Settings ----
 function CloudAccountSettings() {
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Inline auth form state
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
-  const [signupSuccess, setSignupSuccess] = useState(false);
-
-  useEffect(() => {
-    getCloudUser()
-      .then((user) => {
-        setUserEmail(user?.email || null);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+  const account = useMuseStore((s) => s.ui.account);
+  const cloudStatus = useMuseStore((s) => s.ui.cloudStatus);
+  const cloudError = useMuseStore((s) => s.ui.cloudError);
+  const setAccount = useMuseStore((s) => s.setAccount);
+  const setOnboardingChoice = useMuseStore((s) => s.setOnboardingChoice);
+  const resetLocalData = useMuseStore((s) => s.resetLocalData);
+  const [mode, setMode] = useState<AuthMode>('signin');
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const handleSignOut = async () => {
-    await cloudSignOut();
-    setUserEmail(null);
-  };
-
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-
-    if (!email || !password) {
-      setAuthError('Email and password are required');
-      return;
-    }
-    if (password.length < 6) {
-      setAuthError('Password must be at least 6 characters');
-      return;
-    }
-    if (authMode === 'signup' && password !== confirmPassword) {
-      setAuthError('Passwords do not match');
-      return;
-    }
-
-    setAuthLoading(true);
+    if (!account) return;
+    setSigningOut(true);
     try {
-      if (authMode === 'signup') {
-        await cloudSignUp(email, password);
-        setSignupSuccess(true);
-      } else {
-        await cloudSignIn(email, password);
-        const user = await getCloudUser();
-        setUserEmail(user?.email || email);
-      }
-    } catch (err: any) {
-      setAuthError(err.message || 'Authentication failed');
+      const sync = await import('../utils/cloudSync');
+      // Upload the latest state first so nothing done in the last moments is lost.
+      await sync
+        .cloudPush(account.uid, useMuseStore.getState().getSyncPayload(), getDeviceId())
+        .catch(() => {});
+      await sync.cloudSignOut();
     } finally {
-      setAuthLoading(false);
+      // This device's copy is cleared; the account keeps everything.
+      resetLocalData();
+      setSigningOut(false);
+      setConfirmingSignOut(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <SectionHeader title="Cloud Account" subtitle="Manage your cloud sync account" />
-        <p className="text-xs text-nord4">Loading...</p>
-      </div>
-    );
-  }
+  const statusText =
+    cloudStatus === 'ready'
+      ? 'Up to date'
+      : cloudStatus === 'syncing'
+      ? 'Syncing…'
+      : cloudStatus === 'error'
+      ? 'Not syncing right now'
+      : 'Connecting…';
+  const statusColor =
+    cloudStatus === 'ready' ? 'bg-nord14' : cloudStatus === 'error' ? 'bg-nord11' : 'bg-nord13';
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="Cloud Account" subtitle="Sync your tasks across devices via the cloud" />
+      <SectionHeader title="Account" subtitle="Back up your schedule and keep it in sync across devices" />
 
-      {userEmail ? (
+      {account ? (
         <>
-          <SettingRow label="Signed in as" description="Your cloud sync account">
-            <span className="text-sm text-nord8">{userEmail}</span>
+          <SettingRow label="Signed in as" description="Your Muse account">
+            <span className="text-sm text-nord8 break-all">{account.email}</span>
           </SettingRow>
-          <SettingRow label="Sync status" description="Data syncs automatically when changes are made">
-            <span className="flex items-center gap-2 text-sm text-nord14">
-              <span className="w-2 h-2 bg-nord14 inline-block" />
-              Active
+          <SettingRow label="Sync" description="Changes upload automatically and arrive live on your other devices">
+            <span className="flex items-center gap-2 text-sm text-nord6">
+              <span className={`w-2 h-2 inline-block ${statusColor}`} />
+              {statusText}
             </span>
           </SettingRow>
+          {cloudStatus === 'error' && cloudError && (
+            <p className="text-xs text-nord12">
+              {cloudError} Your work is safe on this device and will sync once the connection recovers.
+            </p>
+          )}
           <div className="pt-2">
-            <button onClick={handleSignOut} className="btn-danger">
-              Sign Out
-            </button>
+            {confirmingSignOut ? (
+              <div className="p-4 border border-nord3 bg-nord1 space-y-3">
+                <p className="text-xs text-nord4 leading-relaxed">
+                  Signing out removes your schedule from this device. Everything stays in your
+                  account — sign back in any time to get it back.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={handleSignOut} disabled={signingOut} className="btn-danger">
+                    {signingOut ? 'Signing out…' : 'Sign out'}
+                  </button>
+                  <button onClick={() => setConfirmingSignOut(false)} className="btn-secondary">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmingSignOut(true)} className="btn-danger">
+                Sign out
+              </button>
+            )}
           </div>
         </>
-      ) : signupSuccess ? (
-        <div className="p-4 border border-nord3 bg-nord1 space-y-3">
-          <p className="text-sm text-nord14 font-medium">Check your email!</p>
-          <p className="text-xs text-nord4">
-            A confirmation link was sent to <span className="text-nord8">{email}</span>.
-            Click it to verify your account, then sign in below.
-          </p>
-          <button
-            onClick={() => {
-              setSignupSuccess(false);
-              setAuthMode('signin');
-              setPassword('');
-              setConfirmPassword('');
-            }}
-            className="btn-primary text-xs"
-          >
-            Go to Sign In
-          </button>
-        </div>
       ) : (
-        <div className="p-4 border border-nord3 bg-nord1 space-y-4">
-          <p className="text-xs text-nord4">
-            Sign in or create an account to sync tasks across devices.
+        <div className="p-4 border border-nord3 bg-nord1 space-y-4 max-w-sm">
+          <p className="text-xs text-nord4 leading-relaxed">
+            You’re using Muse without an account, so your schedule lives only on this device.
+            Log in or create an account to back it up — everything here comes with you.
           </p>
-
-          {/* Tabs */}
-          <div className="flex border-b border-nord3">
-            <button
-              onClick={() => { setAuthMode('signin'); setAuthError(''); }}
-              className={`flex-1 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                authMode === 'signin'
-                  ? 'border-nord8 text-nord8'
-                  : 'border-transparent text-nord4 hover:text-nord6'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => { setAuthMode('signup'); setAuthError(''); }}
-              className={`flex-1 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-                authMode === 'signup'
-                  ? 'border-nord8 text-nord8'
-                  : 'border-transparent text-nord4 hover:text-nord6'
-              }`}
-            >
-              Sign Up
-            </button>
-          </div>
-
-          {/* Error */}
-          {authError && (
-            <div className="p-2 text-xs text-nord11 bg-nord11/10 border border-nord11/30">
-              {authError}
-            </div>
-          )}
-
-          {/* Form */}
-          <form onSubmit={handleAuth} className="space-y-3">
-            <div>
-              <label className="block text-xs text-nord4 mb-1">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input-base"
-                placeholder="you@example.com"
-                autoComplete="email"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-nord4 mb-1">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="input-base"
-                placeholder="••••••••"
-                autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
-              />
-            </div>
-            {authMode === 'signup' && (
-              <div>
-                <label className="block text-xs text-nord4 mb-1">Confirm Password</label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="input-base"
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                />
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="btn-primary w-full"
-            >
-              {authLoading
-                ? 'Please wait...'
-                : authMode === 'signin'
-                ? 'Sign In'
-                : 'Create Account'}
-            </button>
-          </form>
+          <AuthForm
+            mode={mode}
+            onModeChange={setMode}
+            onSuccess={(signedIn) => {
+              setOnboardingChoice('account');
+              setAccount(signedIn);
+            }}
+          />
         </div>
       )}
     </div>
@@ -850,25 +764,37 @@ function NotificationSettings({ settings, updateSettings }: any) {
 
       <SettingRow label="Enable notifications" description="Show desktop notifications for upcoming items">
         <button
-          onClick={() =>
-            updateSettings({ notificationsEnabled: !settings.notificationsEnabled })
-          }
+          onClick={() => {
+            const enabling = !settings.notificationsEnabled;
+            // Ask for permission from the click itself — browsers ignore
+            // permission prompts that aren't tied to a user gesture.
+            if (enabling && 'Notification' in window && Notification.permission === 'default') {
+              Notification.requestPermission();
+            }
+            updateSettings({ notificationsEnabled: enabling });
+          }}
+          aria-label="Enable notifications"
+          aria-pressed={settings.notificationsEnabled}
           className={`toggle ${settings.notificationsEnabled ? 'active' : ''}`}
         />
       </SettingRow>
 
+      {settings.notificationsEnabled && 'Notification' in window && Notification.permission === 'denied' && (
+        <p className="text-xs text-nord12">
+          Notifications are blocked for this site in your browser settings, so reminders can’t appear.
+        </p>
+      )}
+
       {settings.notificationsEnabled && (
         <SettingRow label="Notify before" description="Minutes before event/task start time">
           <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={0}
-              max={60}
-              step={5}
+            <NumberField
               value={settings.notifyMinutesBefore}
-              onChange={(e) =>
-                updateSettings({ notifyMinutesBefore: parseInt(e.target.value) })
-              }
+              min={0}
+              max={120}
+              step={5}
+              onCommit={(notifyMinutesBefore) => updateSettings({ notifyMinutesBefore })}
+              aria-label="Minutes before to notify"
               className="input-base w-24 text-center"
             />
             <span className="text-xs text-nord3">minutes</span>
@@ -986,7 +912,7 @@ function DateOverridesEditor({ profile, updateProfile }: { profile: SchedulingHo
 }
 
 // ---- Calendar Sync Settings ----
-function CalendarSyncSettings({ importICS, exportICS }: { importICS: (content: string) => number; exportICS: () => string }) {
+function CalendarSyncSettings({ importICS, exportICS }: { importICS: (content: string) => Promise<number>; exportICS: () => string }) {
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const handleImport = () => {
@@ -998,8 +924,12 @@ function CalendarSyncSettings({ importICS, exportICS }: { importICS: (content: s
       if (!file) return;
       const text = await file.text();
       const count = await importICS(text);
-      setImportStatus(`Imported ${count} event${count !== 1 ? 's' : ''}`);
-      setTimeout(() => setImportStatus(null), 3000);
+      setImportStatus(
+        count > 0
+          ? `Imported ${count} event${count !== 1 ? 's' : ''} (re-imports update existing ones)`
+          : 'No events found in that file'
+      );
+      setTimeout(() => setImportStatus(null), 4000);
     };
     input.click();
   };
@@ -1012,7 +942,8 @@ function CalendarSyncSettings({ importICS, exportICS }: { importICS: (content: s
     a.href = url;
     a.download = `muse-calendar-${new Date().toISOString().slice(0, 10)}.ics`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Revoking synchronously can cancel the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (

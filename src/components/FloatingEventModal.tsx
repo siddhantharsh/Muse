@@ -20,9 +20,18 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
-import { RepeatFrequency } from '../types';
-import { format, parseISO, differenceInMinutes } from 'date-fns';
-import { durationToReadable } from '../utils/dateUtils';
+import { REPEAT_OPTIONS, INTERVAL_UNIT } from '../utils/repeatOptions';
+import { parseISO, differenceInMinutes, addMinutes, addDays, startOfDay, isAfter } from 'date-fns';
+import {
+  durationToReadable,
+  toDateTimeInputValue,
+  fromDateTimeInputValue,
+  toLocalISO,
+} from '../utils/dateUtils';
+import { getRootScale, rootViewport } from '../utils/viewport';
+import { NumberField } from './NumberField';
+
+const MODAL_WIDTH = 380;
 
 const PRESET_COLORS = [
   '#8FBCBB', '#88C0D0', '#81A1C1', '#5E81AC',
@@ -33,26 +42,40 @@ export function FloatingEventModal() {
   const { ui, events, closeFloatingModal, updateEvent, deleteEvent } = useMuseStore();
 
   const modal = ui.floatingModal;
-  if (!modal || modal.type !== 'event') return null;
+  const event =
+    modal && modal.type === 'event' ? events.find((e) => e.id === modal.id) : undefined;
 
-  const event = events.find((e) => e.id === modal.id);
-  if (!event) return null;
-
-  const [position, setPosition] = useState({ x: modal.x, y: modal.y });
+  // Hooks must run unconditionally on every render (Rules of Hooks) — if the
+  // event backing this modal is deleted elsewhere while the modal is still
+  // open, `event` becomes undefined but this component keeps rendering (its
+  // parent's condition only checks `modal.type`), so the early return below
+  // must come AFTER every hook, never before.
+  // modal.x/y are screen pixels; this window lives inside the zoomed #root.
+  const [position, setPosition] = useState(() => {
+    const scale = getRootScale();
+    const vp = rootViewport(scale);
+    return {
+      x: Math.max(0, Math.min((modal?.x ?? 0) / scale, vp.width - MODAL_WIDTH - 8)),
+      y: Math.max(0, Math.min((modal?.y ?? 0) / scale, vp.height - 240)),
+    };
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [editingTitle, setEditingTitle] = useState(false);
-  const [title, setTitle] = useState(event.title);
+  const [title, setTitle] = useState(event?.title ?? '');
+  // Escape cancels a rename; the blur that follows must not save it.
+  const cancelTitleEdit = useRef(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showRepeatDropdown, setShowRepeatDropdown] = useState(false);
 
   // Dragging logic-
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      const scale = getRootScale();
       setIsDragging(true);
       setDragOffset({
-        x: e.clientX - position.x,
-        y: e.clientY - position.y,
+        x: e.clientX / scale - position.x,
+        y: e.clientY / scale - position.y,
       });
     },
     [position]
@@ -61,9 +84,11 @@ export function FloatingEventModal() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging) {
+        const scale = getRootScale();
+        const vp = rootViewport(scale);
         setPosition({
-          x: Math.max(0, Math.min(e.clientX - dragOffset.x, window.innerWidth - 380)),
-          y: Math.max(0, Math.min(e.clientY - dragOffset.y, window.innerHeight - 200)),
+          x: Math.max(0, Math.min(e.clientX / scale - dragOffset.x, vp.width - MODAL_WIDTH)),
+          y: Math.max(0, Math.min(e.clientY / scale - dragOffset.y, vp.height - 200)),
         });
       }
     };
@@ -79,18 +104,59 @@ export function FloatingEventModal() {
     };
   }, [isDragging, dragOffset]);
 
-  const duration = differenceInMinutes(
-    parseISO(event.endTime),
-    parseISO(event.startTime)
-  );
+  // Safe now — every hook above has run unconditionally on every render.
+  if (!modal || modal.type !== 'event' || !event) return null;
+
+  const start = parseISO(event.startTime);
+  const end = parseISO(event.endTime);
+  const duration = differenceInMinutes(end, start);
+  const isOccurrence = !!event.externalId?.startsWith('repeat-');
+  const maxModalHeight = Math.round(rootViewport().height * 0.8);
+
+  // Moving the start keeps the event's length, like every calendar app.
+  const changeStart = (value: string) => {
+    const nextStart = fromDateTimeInputValue(value);
+    if (!nextStart) return;
+    const length = Math.max(event.allDay ? 24 * 60 : 15, duration);
+    updateEvent(event.id, {
+      startTime: nextStart,
+      endTime: toLocalISO(addMinutes(parseISO(nextStart), length)),
+    });
+  };
+
+  // An end at/before the start is rejected — the input snaps back.
+  const changeEnd = (value: string) => {
+    const nextEnd = fromDateTimeInputValue(value);
+    if (!nextEnd || !isAfter(parseISO(nextEnd), start)) return;
+    updateEvent(event.id, { endTime: nextEnd });
+  };
+
+  // All-day events span whole days [00:00, next 00:00); switching back gives
+  // a one-hour 09:00 slot on the same day.
+  const toggleAllDay = () => {
+    if (!event.allDay) {
+      const dayStart = startOfDay(start);
+      const dayEnd = isAfter(end, addDays(dayStart, 1)) ? addDays(startOfDay(end), 1) : addDays(dayStart, 1);
+      updateEvent(event.id, { allDay: true, startTime: toLocalISO(dayStart), endTime: toLocalISO(dayEnd) });
+    } else {
+      const nine = addMinutes(startOfDay(start), 9 * 60);
+      updateEvent(event.id, {
+        allDay: false,
+        startTime: toLocalISO(nine),
+        endTime: toLocalISO(addMinutes(nine, 60)),
+      });
+    }
+  };
 
   return (
     <div
-      className="fixed z-50 w-[380px] bg-nord1  border border-nord3 floating-modal animate-scale-in"
+      role="dialog"
+      aria-label={event.title || 'Event detail'}
+      className="fixed z-50 w-[380px] bg-nord1  border border-nord3 floating-modal animate-scale-in flex flex-col"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
-        maxHeight: '80vh',
+        maxHeight: maxModalHeight,
       }}
     >
       {/* Drag Handle */}
@@ -117,7 +183,7 @@ export function FloatingEventModal() {
       </div>
 
       {/* Content */}
-      <div className="overflow-y-auto scrollable" style={{ maxHeight: 'calc(80vh - 100px)' }}>
+      <div className="overflow-y-auto scrollable flex-1 min-h-0">
         <div className="p-4 space-y-4">
           {/* Title */}
           <div className="flex items-start gap-2">
@@ -129,14 +195,24 @@ export function FloatingEventModal() {
               <input
                 autoFocus
                 value={title}
+                aria-label="Event title"
+                data-dirty={String(title !== event.title)}
                 onChange={(e) => setTitle(e.target.value)}
                 onBlur={() => {
-                  updateEvent(event.id, { title });
+                  if (cancelTitleEdit.current) {
+                    cancelTitleEdit.current = false;
+                    return;
+                  }
+                  updateEvent(event.id, { title: title.trim() || 'Untitled Event' });
                   setEditingTitle(false);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    updateEvent(event.id, { title });
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  if (e.key === 'Escape') {
+                    // Cancel the rename only — the window stays open.
+                    e.stopPropagation();
+                    cancelTitleEdit.current = true;
+                    setTitle(event.title);
                     setEditingTitle(false);
                   }
                 }}
@@ -161,12 +237,9 @@ export function FloatingEventModal() {
             <PropertyRow icon={<Clock size={14} />} label="Start">
               <input
                 type="datetime-local"
-                value={event.startTime.slice(0, 16)}
-                onChange={(e) =>
-                  updateEvent(event.id, {
-                    startTime: e.target.value ? e.target.value + ':00' : event.startTime,
-                  })
-                }
+                aria-label="Start"
+                value={toDateTimeInputValue(event.startTime)}
+                onChange={(e) => changeStart(e.target.value)}
                 className="px-2 py-1 bg-nord0 border border-nord3 text-xs text-nord6 focus:outline-none focus:ring-1 focus:ring-nord8"
               />
             </PropertyRow>
@@ -175,12 +248,10 @@ export function FloatingEventModal() {
             <PropertyRow icon={<Clock size={14} />} label="End">
               <input
                 type="datetime-local"
-                value={event.endTime.slice(0, 16)}
-                onChange={(e) =>
-                  updateEvent(event.id, {
-                    endTime: e.target.value ? e.target.value + ':00' : event.endTime,
-                  })
-                }
+                aria-label="End"
+                value={toDateTimeInputValue(event.endTime)}
+                min={toDateTimeInputValue(event.startTime)}
+                onChange={(e) => changeEnd(e.target.value)}
                 className="px-2 py-1 bg-nord0 border border-nord3 text-xs text-nord6 focus:outline-none focus:ring-1 focus:ring-nord8"
               />
               <span className="text-xs text-nord3">
@@ -191,7 +262,9 @@ export function FloatingEventModal() {
             {/* All Day Toggle */}
             <PropertyRow icon={<CalendarDays size={14} />} label="All Day">
               <button
-                onClick={() => updateEvent(event.id, { allDay: !event.allDay })}
+                onClick={toggleAllDay}
+                aria-label="All day"
+                aria-pressed={event.allDay}
                 className={`toggle ${event.allDay ? 'active' : ''}`}
               />
             </PropertyRow>
@@ -228,17 +301,14 @@ export function FloatingEventModal() {
             {/* Buffer / Travel Time */}
             <PropertyRow icon={<Timer size={14} />} label="Buffer Before">
               <div className="flex items-center gap-1">
-                <input
-                  type="number"
+                <NumberField
                   value={event.bufferBefore}
-                  onChange={(e) =>
-                    updateEvent(event.id, {
-                      bufferBefore: Math.max(0, parseInt(e.target.value) || 0),
-                    })
-                  }
-                  className="w-14 px-2 py-1 bg-nord0 border border-nord3 text-xs text-nord6 text-center focus:outline-none"
                   min={0}
+                  max={1440}
                   step={5}
+                  onCommit={(bufferBefore) => updateEvent(event.id, { bufferBefore })}
+                  aria-label="Buffer before in minutes"
+                  className="w-14 px-2 py-1 bg-nord0 border border-nord3 text-xs text-nord6 text-center focus:outline-none"
                 />
                 <span className="text-xs text-nord3">min</span>
               </div>
@@ -246,17 +316,14 @@ export function FloatingEventModal() {
 
             <PropertyRow icon={<Timer size={14} />} label="Buffer After">
               <div className="flex items-center gap-1">
-                <input
-                  type="number"
+                <NumberField
                   value={event.bufferAfter}
-                  onChange={(e) =>
-                    updateEvent(event.id, {
-                      bufferAfter: Math.max(0, parseInt(e.target.value) || 0),
-                    })
-                  }
-                  className="w-14 px-2 py-1 bg-nord0 border border-nord3 text-xs text-nord6 text-center focus:outline-none"
                   min={0}
+                  max={1440}
                   step={5}
+                  onCommit={(bufferAfter) => updateEvent(event.id, { bufferAfter })}
+                  aria-label="Buffer after in minutes"
+                  className="w-14 px-2 py-1 bg-nord0 border border-nord3 text-xs text-nord6 text-center focus:outline-none"
                 />
                 <span className="text-xs text-nord3">min</span>
               </div>
@@ -273,7 +340,13 @@ export function FloatingEventModal() {
               />
             </PropertyRow>
 
-            {/* Repeat */}
+            {/* Repeat — an occurrence follows its series; edit the first event to change it */}
+            {isOccurrence ? (
+              <p className="text-[11px] leading-relaxed text-nord4 bg-nord0 border border-nord3/60 px-3 py-2">
+                One occurrence of a repeating event. Changes here affect only this one;
+                edit the first event in the series to change them all.
+              </p>
+            ) : (
             <PropertyRow icon={<Repeat size={14} />} label="Repeat">
               <div className="relative">
                 <button
@@ -293,7 +366,7 @@ export function FloatingEventModal() {
                     >
                       None
                     </button>
-                    {Object.values(RepeatFrequency).map((freq) => (
+                    {REPEAT_OPTIONS.map((freq) => (
                       <button
                         key={freq}
                         onClick={() => {
@@ -310,7 +383,24 @@ export function FloatingEventModal() {
                   </div>
                 )}
               </div>
+              {event.repeatingRule && (
+                <label className="flex items-center gap-1.5 text-[10px] text-nord3">
+                  every
+                  <NumberField
+                    value={event.repeatingRule.interval || 1}
+                    min={1}
+                    max={99}
+                    onCommit={(interval) =>
+                      updateEvent(event.id, { repeatingRule: { ...event.repeatingRule!, interval } })
+                    }
+                    aria-label="Repeat interval"
+                    className="w-10 px-1 py-0.5 bg-nord0 border border-nord3 text-xs text-nord6 text-center focus:outline-none"
+                  />
+                  {INTERVAL_UNIT[event.repeatingRule.frequency]}
+                </label>
+              )}
             </PropertyRow>
+            )}
 
             {/* Color */}
             <PropertyRow icon={<Palette size={14} />} label="Color">
@@ -371,7 +461,7 @@ export function FloatingEventModal() {
           className="btn-danger text-xs flex items-center gap-1"
         >
           <Trash2 size={12} />
-          Delete Event
+          {event.repeatingRule ? 'Delete series' : isOccurrence ? 'Delete this occurrence' : 'Delete event'}
         </button>
       </div>
     </div>

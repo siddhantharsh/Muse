@@ -34,7 +34,7 @@ When a meeting runs over, a task gets skipped, or a deadline changes — hit **R
 - **Priority Supersedes Deadline** — When conflicts arise, high-priority tasks are preserved even if it means a low-priority task misses its deadline. The sacrificed task turns red.
 - **Balanced vs Front-Load Distribution** — Choose between evenly spreading work across days (prevents burnout) or greedily packing everything into the earliest slots (clears your queue fast).
 - **Cross-Platform** — Desktop (Electron), Web (PWA), and Mobile (responsive browser + Android WebView APK).
-- **Cloud Sync** — Supabase-powered authentication and real-time data sync across devices.
+- **Cloud Sync** — Optional email account (Firebase Auth) with live sync across devices (Firestore).
 
 ---
 
@@ -85,7 +85,7 @@ When a meeting runs over, a task gets skipped, or a deadline changes — hit **R
 | State Management | Zustand 4.5 |
 | Styling | TailwindCSS 3.4 + Nord Theme |
 | Persistence | localStorage + IndexedDB (dual-write) |
-| Cloud Sync | Supabase (Auth + PostgreSQL) |
+| Cloud Sync | Firebase Auth + Firestore (optional) |
 | Icons | Lucide React |
 | Date Handling | date-fns 3.6 |
 
@@ -241,7 +241,7 @@ The engine stops scheduling beyond a configurable horizon (default: 8 weeks). Da
 
 ### Sync & Storage
 - [x] Dual persistence: localStorage (fast) + IndexedDB (durable)
-- [x] Supabase cloud sync (sign up / sign in / auto-push / auto-pull)
+- [x] Firebase cloud sync (email sign-in, live updates across devices)
 - [x] Data export and import
 
 ### Cross-Platform
@@ -340,6 +340,13 @@ npm run dev
 npm run electron:dev
 ```
 
+The project builds two HTML entry points:
+- `index.html` (served at `/`) — the marketing landing page.
+- `app.html` (served at `/app.html`) — the actual scheduler app. This is what
+  Electron, the installed PWA, and the "Launch App" links on the landing page
+  open. When running `npm run dev`, visit `http://localhost:5173/app.html`
+  directly to work on the app itself.
+
 ### Production Build
 
 ```bash
@@ -357,31 +364,17 @@ npm run electron:build:win
 
 ## Cloud Sync Setup (Optional)
 
-Muse supports cloud sync via [Supabase](https://supabase.com) for cross-device data synchronization.
+The app is preconfigured for the `muse-in` Firebase project. To enable accounts:
 
-### 1. Create a Supabase Project
+1. Firebase console → **Authentication** → Get started → enable **Email/Password**.
+2. Firebase console → **Firestore Database** → Create database (production mode).
+3. Deploy the security rules and site: `npx firebase-tools deploy --only hosting,firestore:rules`
 
-1. Go to [supabase.com](https://supabase.com) and create a new project
-2. Open **SQL Editor** in the dashboard
-3. Run the contents of `supabase/schema.sql`
+Until step 1 is done, the welcome screen's email login shows a clear "not switched on yet" message and the app works fully offline.
 
-### 2. Configure Environment Variables
+## Tests
 
-```bash
-# Edit .env with your project details
-VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
-```
-
-Get these from: **Supabase Dashboard → Settings → API**
-
-### 3. Enable Email Auth
-
-In Supabase Dashboard → Authentication → Providers, ensure **Email** is enabled.
-
-### 4. Sign In
-
-Open Muse → Settings → Cloud Account → Sign In with your email and password.
+`npm test` runs the Vitest suite (scheduler, repeating series, ICS, sync merge, store).
 
 ---
 

@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import {
   Calendar,
   ListTodo,
+  Inbox,
   AlertTriangle,
   Settings,
   Plus,
@@ -18,6 +19,7 @@ import {
   Menu,
 } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
+import { getVisibleOpenTasks, getMissedTasks } from '../utils/taskSelectors';
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -50,11 +52,12 @@ export function Sidebar() {
   const [quickCapture, setQuickCapture] = useState('');
   const isMobile = useIsMobile();
 
+  // Same selectors as the views themselves, so a badge always matches its list.
+  const now = new Date();
+  const visibleOpen = getVisibleOpenTasks(tasks, now);
   const inboxCount = tasks.filter((t) => t.inInbox && !t.completed).length;
-  const taskCount = tasks.filter((t) => !t.completed).length;
-  const missedCount = tasks.filter(
-    (t) => !t.completed && t.dueDate && new Date(t.dueDate) < new Date() && !t.autoIgnore
-  ).length;
+  const taskCount = visibleOpen.length;
+  const missedCount = getMissedTasks(tasks, now).length;
 
   // On mobile, collapsed sidebar is completely hidden (use header menu button)
   if (!ui.sidebarOpen) {
@@ -77,12 +80,20 @@ export function Sidebar() {
           <Calendar size={14} />
         </button>
         <button
+          onClick={() => setActiveView('tasks')}
+          className={`p-1.5 transition-colors relative ${
+            ui.activeView === 'tasks' ? 'bg-nord2 text-nord8' : 'hover:bg-nord2 text-nord4'
+          }`}
+        >
+          <ListTodo size={14} />
+        </button>
+        <button
           onClick={() => setActiveView('inbox')}
           className={`p-1.5 transition-colors relative ${
             ui.activeView === 'inbox' ? 'bg-nord2 text-nord8' : 'hover:bg-nord2 text-nord4'
           }`}
         >
-          <ListTodo size={14} />
+          <Inbox size={14} />
         </button>
         <button
           onClick={() => setActiveView('missed-deadlines')}
@@ -112,6 +123,9 @@ export function Sidebar() {
         title: quickCapture.trim(),
         inInbox: false,
         autoSchedule: true,
+        // Adding while a list is open puts the task in that list, so it
+        // doesn't vanish from the filtered calendar you're looking at.
+        listId: ui.selectedListId ?? undefined,
       });
       setQuickCapture('');
     }
@@ -143,15 +157,16 @@ export function Sidebar() {
         }}
       >
       {/* Quick Capture — terminal input */}
-      <div className="p-2 border-b border-nord3">
-        <div className="flex items-center gap-1 bg-nord0 border border-nord3 px-2 py-1.5">
+      <div className="p-2 border-b border-nord3" data-tour="quick-capture">
+        <div className="flex items-center gap-1 bg-nord0 border border-nord3 px-2 py-1.5 focus-within:border-nord8">
           <span className="text-nord8 text-xs">$</span>
           <input
             type="text"
             value={quickCapture}
             onChange={(e) => setQuickCapture(e.target.value)}
             onKeyDown={handleQuickCapture}
-            placeholder="add task..."
+            placeholder="add task, press enter"
+            aria-label="Add a task"
             className="flex-1 bg-transparent text-xs text-nord6 placeholder:text-nord3 focus:outline-none"
           />
         </div>
@@ -159,7 +174,7 @@ export function Sidebar() {
 
       {/* Navigation Items */}
       <div className="flex-1 overflow-y-auto scrollable">
-        <div className="p-1">
+        <div className="p-1" data-tour="nav">
           <NavItem
             prefix=">"
             label="calendar"
@@ -173,8 +188,18 @@ export function Sidebar() {
           <NavItem
             prefix=">"
             label="tasks"
-            active={ui.activeView === 'inbox'}
+            active={ui.activeView === 'tasks'}
             badge={taskCount > 0 ? taskCount : undefined}
+            onClick={() => {
+              setActiveView('tasks');
+              if (isMobile) toggleSidebar();
+            }}
+          />
+          <NavItem
+            prefix=">"
+            label="inbox"
+            active={ui.activeView === 'inbox'}
+            badge={inboxCount > 0 ? inboxCount : undefined}
             onClick={() => {
               setActiveView('inbox');
               if (isMobile) toggleSidebar();
@@ -220,9 +245,7 @@ export function Sidebar() {
               {lists
                 .sort((a, b) => a.sortOrder - b.sortOrder)
                 .map((list) => {
-                  const taskCount = tasks.filter(
-                    (t) => t.listId === list.id && !t.completed && !t.inInbox
-                  ).length;
+                  const listCount = visibleOpen.filter((t) => t.listId === list.id).length;
 
                   return (
                     <div key={list.id} className="relative group">
@@ -271,8 +294,8 @@ export function Sidebar() {
                             style={{ backgroundColor: list.color }}
                           />
                           <span className="truncate flex-1 text-left">{list.name}</span>
-                          {taskCount > 0 && (
-                            <span className="text-[10px] text-nord3">{taskCount}</span>
+                          {listCount > 0 && (
+                            <span className="text-[10px] text-nord3">{listCount}</span>
                           )}
                         </button>
                       )}
@@ -336,15 +359,18 @@ export function Sidebar() {
           collapse
         </button>
         <button
+          data-tour="settings"
           onClick={() => {
             setActiveView('settings');
             if (isMobile) toggleSidebar(); // close sidebar on mobile
           }}
-          className={`px-2 py-1 text-[10px] transition-colors ${
-            ui.settingsOpen ? 'bg-nord2 text-nord8' : 'text-nord3 hover:bg-nord2 hover:text-nord4'
+          aria-label="Settings"
+          className={`flex items-center gap-1.5 px-2 py-1 text-[10px] transition-colors ${
+            ui.activeView === 'settings' ? 'bg-nord2 text-nord8' : 'text-nord3 hover:bg-nord2 hover:text-nord4'
           }`}
         >
           <Settings size={12} />
+          settings
         </button>
       </div>
     </div>

@@ -124,6 +124,41 @@ export function nowISO(): string {
   return format(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
 }
 
+/**
+ * Every stored timestamp uses one format: local wall-clock time with no
+ * zone suffix ("2026-09-30T14:00:00"). parseISO reads that as local time.
+ */
+export function toLocalISO(d: Date): string {
+  return format(d, "yyyy-MM-dd'T'HH:mm:ss");
+}
+
+/**
+ * Converts a legacy UTC/offset timestamp ("…Z", "+05:30") to the local
+ * format above. Local-format strings pass through unchanged.
+ */
+export function normalizeISO(value: string): string;
+export function normalizeISO(value: string | null): string | null;
+export function normalizeISO(value: string | null): string | null {
+  if (!value) return value;
+  if (!/(Z|[+-]\d{2}:?\d{2})$/.test(value)) return value;
+  const d = parseISO(value);
+  return isNaN(d.getTime()) ? value : toLocalISO(d);
+}
+
+/** Value for an <input type="datetime-local">, robust to legacy formats. */
+export function toDateTimeInputValue(value: string | null): string {
+  if (!value) return '';
+  const d = parseISO(value);
+  return isNaN(d.getTime()) ? '' : format(d, "yyyy-MM-dd'T'HH:mm");
+}
+
+/** Parses an <input type="datetime-local"> value into the stored format. */
+export function fromDateTimeInputValue(value: string): string | null {
+  if (!value) return null;
+  const d = parseISO(value);
+  return isNaN(d.getTime()) ? null : toLocalISO(d);
+}
+
 export function todayISO(): string {
   return formatDate(new Date());
 }

@@ -8,6 +8,7 @@ import {
   Search,
   Calendar,
   Inbox,
+  ListTodo,
   AlertTriangle,
   Settings,
   Plus,
@@ -15,8 +16,10 @@ import {
   Layout,
   Clock,
   Zap,
+  GraduationCap,
 } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
+import { toLocalISO } from '../utils/dateUtils';
 
 interface Command {
   id: string;
@@ -37,6 +40,7 @@ export function CommandPalette() {
     addEvent,
     setViewMode,
     openFloatingModal,
+    openTutorial,
   } = useMuseStore();
 
   const [query, setQuery] = useState('');
@@ -82,15 +86,16 @@ export function CommandPalette() {
         description: 'Create a new calendar event',
         icon: <Calendar size={16} />,
         action: () => {
+          // Next quarter hour, one hour long — stored as local wall-clock time
+          // like every other timestamp (not UTC, which showed shifted in editors).
           const now = new Date();
           const start = new Date(now);
           start.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
-          const end = new Date(start);
-          end.setHours(start.getHours() + 1);
+          const end = new Date(start.getTime() + 60 * 60 * 1000);
           const event = addEvent({
             title: '',
-            startTime: start.toISOString(),
-            endTime: end.toISOString(),
+            startTime: toLocalISO(start),
+            endTime: toLocalISO(end),
           });
           openFloatingModal({
             type: 'event',
@@ -137,6 +142,17 @@ export function CommandPalette() {
         category: 'Navigate',
       },
       {
+        id: 'view-tasks',
+        label: 'Go to Tasks',
+        description: 'Switch to the all-tasks list',
+        icon: <ListTodo size={16} />,
+        action: () => {
+          setActiveView('tasks');
+          setCommandPaletteOpen(false);
+        },
+        category: 'Navigate',
+      },
+      {
         id: 'view-missed',
         label: 'Go to Missed Deadlines',
         description: 'View overdue tasks',
@@ -144,6 +160,17 @@ export function CommandPalette() {
         action: () => {
           setActiveView('missed-deadlines');
           setCommandPaletteOpen(false);
+        },
+        category: 'Navigate',
+      },
+      {
+        id: 'show-tutorial',
+        label: 'Show Tutorial',
+        description: 'Replay the guided tour of Muse',
+        icon: <GraduationCap size={16} />,
+        action: () => {
+          setCommandPaletteOpen(false);
+          openTutorial();
         },
         category: 'Navigate',
       },
@@ -226,7 +253,9 @@ export function CommandPalette() {
 
       {/* Palette */}
       <div
-        className="relative w-[520px] bg-nord1  border border-nord3 shadow-2xl overflow-hidden animate-scale-in"
+        role="dialog"
+        aria-label="Command palette"
+        className="relative w-[520px] max-w-[calc(100vw-32px)] bg-nord1  border border-nord3 shadow-2xl overflow-hidden animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search Input */}

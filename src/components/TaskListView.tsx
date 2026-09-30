@@ -16,9 +16,12 @@ import {
   Timer,
   Zap,
   Target,
+  Link2,
+  Repeat,
 } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
 import { Task, Priority, UrgencyColor } from '../types';
+import { getVisibleOpenTasks, isRepeatingTemplate } from '../utils/taskSelectors';
 import { format, parseISO, isToday, isTomorrow, isAfter, differenceInHours, differenceInMinutes, differenceInDays, startOfDay, addDays } from 'date-fns';
 
 export function TaskListView() {
@@ -45,8 +48,13 @@ export function TaskListView() {
 
   // Group tasks into sections
   const grouped = useMemo(() => {
-    const active = tasks.filter((t) => !t.completed);
-    const completed = tasks.filter((t) => t.completed).slice(0, 15);
+    // Series collapse to their next occurrence (plus any missed ones), so a
+    // daily task shows once instead of ~60 times.
+    const active = getVisibleOpenTasks(tasks, now);
+    const completed = tasks
+      .filter((t) => t.completed && !t.inInbox && !isRepeatingTemplate(t))
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+      .slice(0, 15);
 
     const overdue: Task[] = [];
     const today: Task[] = [];
@@ -419,6 +427,7 @@ function TaskRow({
           e.stopPropagation();
           onComplete();
         }}
+        aria-label={`Mark “${task.title || 'Untitled'}” as done`}
         className="w-4 h-4 border border-nord3 hover:border-nord8 flex-shrink-0 transition-colors flex items-center justify-center"
       />
 
@@ -475,14 +484,34 @@ function TaskRow({
           {nextScheduled && (
             <span className="flex items-center gap-1 text-[10px] text-nord9">
               <CalendarDays size={9} />
-              {format(parseISO(nextScheduled.startTime), 'HH:mm')}
+              {isToday(parseISO(nextScheduled.startTime))
+                ? format(parseISO(nextScheduled.startTime), 'HH:mm')
+                : format(parseISO(nextScheduled.startTime), 'EEE d, HH:mm')}
+            </span>
+          )}
+
+          {/* Repeating occurrence */}
+          {task.isRepeatingInstance && (
+            <span className="text-[10px] text-nord3" title="Repeats">
+              <Repeat size={9} />
             </span>
           )}
 
           {/* Auto-schedule indicator */}
-          {task.autoSchedule && (
+          {task.autoSchedule && !task.schedulingBlocked && (
             <span className="text-[10px] text-nord8">
               <Zap size={9} />
+            </span>
+          )}
+
+          {/* Blocked-by-dependency indicator */}
+          {task.schedulingBlocked && (
+            <span
+              className="flex items-center gap-1 text-[10px] text-nord11 font-medium"
+              title="Waiting on an incomplete dependency — can't be scheduled yet"
+            >
+              <Link2 size={9} />
+              Blocked
             </span>
           )}
         </div>
@@ -514,14 +543,15 @@ function TaskRow({
 // Helpers
 // ============================================================
 
+/** Start of the next block that hasn't finished yet (a block in progress counts). */
 function getNextScheduledDate(task: Task): Date | null {
   if (task.scheduledBlocks.length === 0) return null;
   const now = new Date();
-  const future = task.scheduledBlocks
+  const upcoming = task.scheduledBlocks
+    .filter((b) => isAfter(parseISO(b.endTime), now))
     .map((b) => parseISO(b.startTime))
-    .filter((d) => isAfter(d, now))
     .sort((a, b) => a.getTime() - b.getTime());
-  return future.length > 0 ? future[0] : null;
+  return upcoming.length > 0 ? upcoming[0] : null;
 }
 
 function getEffectiveDate(
