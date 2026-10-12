@@ -75,10 +75,17 @@ export function runScheduler(
   // deadline vs. remaining work) — this ranks tasks for placement order and
   // decides which ones get force-front-loaded. This is only an estimate: the
   // authoritative color is recomputed after placement in Step 8.
-  const rankedTasks = tasksToSchedule.map((t) => ({
+  // A dependent can't start until its prerequisites are done, so their
+  // remaining work counts against its capacity too.
+  const taskIndex = new Map(updatedTasks.map((t) => [t.id, t]));
+  const estimated = tasksToSchedule.map((t) => ({
     ...t,
-    urgencyColor: estimateUrgency(t, now, availableSlots),
+    urgencyColor: estimateUrgency(t, now, availableSlots, prerequisiteMinutes(t, taskIndex)),
   }));
+  // Prerequisites inherit the most demanding priority / deadline / urgency of
+  // everything waiting on them — otherwise a low-priority prerequisite of an
+  // urgent task gets pushed back and drags the urgent task with it.
+  const rankedTasks = inheritFromDependents(estimated);
 
   // Step 6: Clear existing auto-scheduled blocks, but keep any block the
   // user manually pinned (e.g. dragged to a fixed time) and any block that
@@ -155,6 +162,99 @@ function isTemplate(task: Task): boolean {
   return !!task.repeatingRule && !task.isRepeatingInstance;
 }
 
+/** A prerequisite that's done — ticked off, or all its work recorded. */
+function isSatisfied(task: Task): boolean {
+  return task.completed || task.duration - task.progress <= 0;
+}
+
+/** Remaining minutes of every unfinished prerequisite, direct or indirect. */
+function prerequisiteMinutes(task: Task, index: Map<string, Task>): number {
+  const seen = new Set<string>();
+  const stack = [...task.dependsOn];
+  let minutes = 0;
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id) || id === task.id) continue;
+    seen.add(id);
+    const dep = index.get(id);
+    if (!dep || isSatisfied(dep)) continue;
+    minutes += dep.duration - dep.progress;
+    stack.push(...dep.dependsOn);
+  }
+  return minutes;
+}
+
+/**
+ * A task as the solver ranks it. Prerequisites carry the most demanding
+ * priority, deadline and urgency of everything downstream of them, and are
+ * flagged so they're never spread out (that would delay their dependents).
+ */
+type RankedTask = Task & {
+  rankPriority: Priority;
+  rankDue: string | null;
+  gatesOthers: boolean;
+};
+
+const URGENCY_RANK: Record<UrgencyColor, number> = {
+  [UrgencyColor.Green]: 0,
+  [UrgencyColor.Orange]: 1,
+  [UrgencyColor.Red]: 2,
+};
+
+function inheritFromDependents(tasks: Task[]): RankedTask[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const dependentsOf = new Map<string, string[]>();
+  for (const t of tasks) {
+    for (const depId of t.dependsOn) {
+      if (!byId.has(depId)) continue;
+      if (!dependentsOf.has(depId)) dependentsOf.set(depId, []);
+      dependentsOf.get(depId)!.push(t.id);
+    }
+  }
+
+  type Inherited = { priority: number; due: number; urgency: number };
+  const memo = new Map<string, Inherited>();
+  const visiting = new Set<string>(); // cycle guard — cycles are blocked later anyway
+
+  const resolve = (id: string): Inherited => {
+    const cached = memo.get(id);
+    if (cached) return cached;
+    const t = byId.get(id)!;
+    const own: Inherited = {
+      priority: PRIORITY_WEIGHT[t.priority] ?? 1,
+      due: t.dueDate ? parseISO(t.dueDate).getTime() : Infinity,
+      urgency: URGENCY_RANK[t.urgencyColor] ?? 0,
+    };
+    visiting.add(id);
+    for (const childId of dependentsOf.get(id) ?? []) {
+      if (visiting.has(childId)) continue;
+      const child = resolve(childId);
+      own.priority = Math.max(own.priority, child.priority);
+      own.due = Math.min(own.due, child.due);
+      own.urgency = Math.max(own.urgency, child.urgency);
+    }
+    visiting.delete(id);
+    memo.set(id, own);
+    return own;
+  };
+
+  const priorityByWeight = Object.fromEntries(
+    Object.entries(PRIORITY_WEIGHT).map(([p, w]) => [w, p as Priority])
+  ) as Record<number, Priority>;
+  const urgencyByRank = [UrgencyColor.Green, UrgencyColor.Orange, UrgencyColor.Red];
+
+  return tasks.map((t) => {
+    const inherited = resolve(t.id);
+    return {
+      ...t,
+      urgencyColor: urgencyByRank[inherited.urgency],
+      rankPriority: priorityByWeight[inherited.priority] ?? t.priority,
+      rankDue: Number.isFinite(inherited.due) ? toLocalISO(new Date(inherited.due)) : null,
+      gatesOthers: dependentsOf.has(t.id),
+    };
+  });
+}
+
 // ============================================================
 // URGENCY ESTIMATION (pre-placement)
 // Used only to rank/order tasks before the solver runs. Compares the
@@ -165,13 +265,17 @@ function isTemplate(task: Task): boolean {
 function estimateUrgency(
   task: Task,
   now: Date,
-  availableSlots: Map<string, TimeSlot[]>
+  availableSlots: Map<string, TimeSlot[]>,
+  prerequisiteLoad = 0
 ): UrgencyColor {
   if (task.completed || !task.dueDate) return UrgencyColor.Green;
 
   const dueDate = parseISO(task.dueDate);
   const pinnedMinutes = lockedBlocks(task, now).reduce((sum, b) => sum + b.duration, 0);
-  const remaining = task.duration - task.progress - pinnedMinutes;
+  const ownRemaining = task.duration - task.progress - pinnedMinutes;
+  if (ownRemaining <= 0) return UrgencyColor.Green;
+  // Unfinished prerequisites have to fit in the same window first.
+  const remaining = ownRemaining + prerequisiteLoad;
   if (remaining <= 0) return UrgencyColor.Green;
 
   // Already overdue
@@ -317,17 +421,21 @@ function compareForScheduling(a: Task, b: Task): number {
   const bIsOrange = b.urgencyColor === UrgencyColor.Orange ? 1 : 0;
   if (aIsOrange !== bIsOrange) return bIsOrange - aIsOrange;
 
-  // 3. Priority (High > Medium > Low > None)
-  const priDiff = PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority];
+  // 3. Priority (High > Medium > Low > None) — inherited from dependents
+  const aPriority = (a as RankedTask).rankPriority ?? a.priority;
+  const bPriority = (b as RankedTask).rankPriority ?? b.priority;
+  const priDiff = PRIORITY_WEIGHT[bPriority] - PRIORITY_WEIGHT[aPriority];
   if (priDiff !== 0) return priDiff;
 
-  // 4. Due date (earlier deadline first)
-  if (a.dueDate && b.dueDate) {
-    const dueDiff = parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime();
+  // 4. Due date (earlier deadline first) — inherited from dependents
+  const aDue = 'rankDue' in a ? (a as RankedTask).rankDue : a.dueDate;
+  const bDue = 'rankDue' in b ? (b as RankedTask).rankDue : b.dueDate;
+  if (aDue && bDue) {
+    const dueDiff = parseISO(aDue).getTime() - parseISO(bDue).getTime();
     if (dueDiff !== 0) return dueDiff;
   }
-  if (a.dueDate && !b.dueDate) return -1;
-  if (!a.dueDate && b.dueDate) return 1;
+  if (aDue && !bDue) return -1;
+  if (!aDue && bDue) return 1;
 
   // 5. Shorter tasks first (better packing)
   return a.duration - a.progress - (b.duration - b.progress);
@@ -457,6 +565,15 @@ function buildAvailableSlots(
   return slotsMap;
 }
 
+/**
+ * Next 5-minute mark at or after `date`, with seconds dropped. Rounding only
+ * the minutes field would turn 19:55:30 into 19:55:00 — before "now".
+ */
+function ceilToFiveMinutes(date: Date): Date {
+  const step = 5 * 60_000;
+  return new Date(Math.ceil(date.getTime() / step) * step);
+}
+
 function clampHour(value: number, fallback: number, min: number, max: number): number {
   const n = Math.floor(Number(value));
   if (!Number.isFinite(n)) return fallback;
@@ -517,10 +634,7 @@ function computeProfileSlots(
         // Clamp to now if the start is in the past
         if (isBefore(blockStart, now)) {
           blockStart = new Date(now);
-          // Round up to next 5-minute mark
-          const mins = blockStart.getMinutes();
-          const roundedMins = Math.ceil(mins / 5) * 5;
-          blockStart.setMinutes(roundedMins, 0, 0);
+          blockStart = ceilToFiveMinutes(now);
         }
 
         if (isBefore(blockEnd, blockStart)) continue;
@@ -628,7 +742,7 @@ function scheduleWithDependencies(
     const deps = new Set<string>();
     for (const depId of t.dependsOn) {
       const dep = taskById.get(depId);
-      if (!dep || dep.completed) continue; // already satisfied / not a real dep
+      if (!dep || isSatisfied(dep)) continue; // done / not a real dep
 
       if (!placeableIds.has(depId)) {
         // The prerequisite won't be placed by the engine this run. If the
@@ -673,14 +787,14 @@ function scheduleWithDependencies(
     processed.add(task.id);
 
     // Resolve the earliest this task may start
-    let effectiveStart = now;
+    let effectiveStart = ceilToFiveMinutes(now);
     if (task.startAfter) {
       const startAfter = parseISO(task.startAfter);
       if (isAfter(startAfter, effectiveStart)) effectiveStart = startAfter;
     }
     for (const depId of task.dependsOn) {
       const dep = taskById.get(depId);
-      if (!dep || dep.completed) continue;
+      if (!dep || isSatisfied(dep)) continue;
       // Engine-placed prerequisites were placed earlier this run; manual ones
       // keep the blocks the user pinned.
       const depBlocks = placedBlocksMap.get(depId) ?? lockedBlocks(dep, now);
@@ -776,9 +890,12 @@ function placeOneTask(
   // Old or synced data may lack a sane value; 5 min is the smallest block the UI allows.
   const minBlock = Math.max(5, Number(task.minBlockDuration) || 30);
 
-  // For red/orange tasks, bypass balanced distribution — front-load aggressively
+  // Red/orange tasks bypass balanced distribution and front-load. So does a
+  // prerequisite: spreading it out would only delay everything waiting on it.
   const forceFrontLoad =
-    task.urgencyColor === UrgencyColor.Red || task.urgencyColor === UrgencyColor.Orange;
+    task.urgencyColor === UrgencyColor.Red ||
+    task.urgencyColor === UrgencyColor.Orange ||
+    (task as RankedTask).gatesOthers === true;
 
   const isBalanced =
     settings.distributionModel === DistributionModel.Balanced && !forceFrontLoad;
@@ -829,9 +946,6 @@ function placeOneTask(
         continue; // Skip slots smaller than min block (unless it's the last bit)
       }
 
-      // Compute max block size:
-      // - Balanced mode: spread across days proportionally
-      // - Front-load mode: cap at minBlockDuration to still respect splitting
       const horizonDays = Math.max(
         1,
         differenceInDays(task.dueDate ? parseISO(task.dueDate) : cutoff, slotStart)
@@ -840,9 +954,10 @@ function placeOneTask(
         minBlock,
         Math.ceil(remainingToPlace / horizonDays)
       );
-      const maxPerSlot = isBalanced
-        ? spreadTarget
-        : Math.max(minBlock, Math.min(spreadTarget, minBlock * 2));
+      // Balanced spreads the work toward the deadline; front-load is greedy —
+      // it takes as much of the earliest free slot as the task needs, so free
+      // time is only split where something else is actually in the way.
+      const maxPerSlot = isBalanced ? spreadTarget : remainingToPlace;
 
       let blockDuration = Math.min(remainingToPlace, slotDuration, maxPerSlot);
 
@@ -938,7 +1053,33 @@ function placeOneTask(
     }
   }
 
-  return blocks;
+  return mergeTouchingBlocks(blocks);
+}
+
+/**
+ * Joins auto-placed pieces of one task that end exactly where the next
+ * begins — they're one sitting, and showing them as separate blocks is
+ * just noise. Pinned blocks are left exactly as the user placed them.
+ */
+function mergeTouchingBlocks(blocks: ScheduledBlock[]): ScheduledBlock[] {
+  const pinned = blocks.filter((b) => b.isManuallyPinned);
+  const auto = blocks
+    .filter((b) => !b.isManuallyPinned)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const merged: ScheduledBlock[] = [];
+  for (const block of auto) {
+    const last = merged[merged.length - 1];
+    if (last && last.endTime === block.startTime) {
+      merged[merged.length - 1] = {
+        ...last,
+        endTime: block.endTime,
+        duration: last.duration + block.duration,
+      };
+    } else {
+      merged.push(block);
+    }
+  }
+  return [...pinned, ...merged];
 }
 
 // ============================================================
