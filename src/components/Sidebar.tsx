@@ -43,6 +43,7 @@ export function Sidebar() {
     deleteList,
     addTask,
     toggleSettings,
+    openFloatingModal,
   } = useMuseStore();
 
   const [listsExpanded, setListsExpanded] = useState(true);
@@ -55,7 +56,9 @@ export function Sidebar() {
   // Same selectors as the views themselves, so a badge always matches its list.
   const now = new Date();
   const visibleOpen = getVisibleOpenTasks(tasks, now);
-  const inboxCount = tasks.filter((t) => t.inInbox && !t.completed).length;
+  // A quick-add draft is parked in the inbox while its setup window is open; don't count it.
+  const draftId = ui.floatingModal?.draft ? ui.floatingModal.id : null;
+  const inboxCount = tasks.filter((t) => t.inInbox && !t.completed && t.id !== draftId).length;
   const taskCount = visibleOpen.length;
   const missedCount = getMissedTasks(tasks, now).length;
 
@@ -119,15 +122,20 @@ export function Sidebar() {
 
   const handleQuickCapture = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && quickCapture.trim()) {
-      addTask({
+      // Open the setup window first; the task joins the calendar only when
+      // "Add to calendar" is pressed. Until then it's held in the inbox,
+      // which the scheduler skips.
+      const task = addTask({
         title: quickCapture.trim(),
-        inInbox: false,
+        inInbox: true,
         autoSchedule: true,
         // Adding while a list is open puts the task in that list, so it
         // doesn't vanish from the filtered calendar you're looking at.
         listId: ui.selectedListId ?? undefined,
       });
+      openFloatingModal({ type: 'task', id: task.id, x: 0, y: 0, draft: true });
       setQuickCapture('');
+      if (isMobile) toggleSidebar();
     }
   };
 
@@ -142,7 +150,7 @@ export function Sidebar() {
       {/* Mobile overlay backdrop */}
       {isMobile && (
         <div
-          className="fixed inset-0 bg-black/50 z-40"
+          className="fixed inset-0 bg-nord0/70 z-40"
           onClick={toggleSidebar}
         />
       )}
@@ -425,8 +433,8 @@ function NavItem({
 
 function getRandomColor(): string {
   const colors = [
-    '#88C0D0', '#81A1C1', '#5E81AC', '#8FBCBB',
-    '#A3BE8C', '#B48EAD', '#D08770', '#EBCB8B',
+    '#89b4fa', '#b4befe', '#74c7ec', '#94e2d5',
+    '#a6e3a1', '#cba6f7', '#fab387', '#f9e2af',
   ];
   return colors[Math.floor(Math.random() * colors.length)];
 }

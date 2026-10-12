@@ -30,12 +30,13 @@ import {
 } from '../utils/dateUtils';
 import { getRootScale, rootViewport } from '../utils/viewport';
 import { NumberField } from './NumberField';
+import { useFitInViewport } from '../hooks/useFitInViewport';
 
 const MODAL_WIDTH = 380;
 
 const PRESET_COLORS = [
-  '#8FBCBB', '#88C0D0', '#81A1C1', '#5E81AC',
-  '#BF616A', '#D08770', '#EBCB8B', '#A3BE8C', '#B48EAD',
+  '#cba6f7', '#f5c2e7', '#89b4fa', '#74c7ec', '#94e2d5',
+  '#a6e3a1', '#f9e2af', '#fab387', '#f38ba8', '#b4befe',
 ];
 
 export function FloatingEventModal() {
@@ -65,6 +66,8 @@ export function FloatingEventModal() {
   const [title, setTitle] = useState(event?.title ?? '');
   // Escape cancels a rename; the blur that follows must not save it.
   const cancelTitleEdit = useRef(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFitInViewport(modalRef, setPosition, !!event);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showRepeatDropdown, setShowRepeatDropdown] = useState(false);
 
@@ -150,6 +153,7 @@ export function FloatingEventModal() {
 
   return (
     <div
+      ref={modalRef}
       role="dialog"
       aria-label={event.title || 'Event detail'}
       className="fixed z-50 w-[380px] bg-nord1  border border-nord3 floating-modal animate-scale-in flex flex-col"
@@ -279,7 +283,7 @@ export function FloatingEventModal() {
                   onClick={() => updateEvent(event.id, { busy: true })}
                   className={`px-2 py-1 text-xs transition-all ${
                     event.busy
-                      ? 'bg-nord11/20 text-nord11 border border-red-500/30'
+                      ? 'bg-nord11/20 text-nord11 border border-nord11/30'
                       : 'text-nord3 border border-nord3 hover:bg-nord2'
                   }`}
                 >
@@ -289,7 +293,7 @@ export function FloatingEventModal() {
                   onClick={() => updateEvent(event.id, { busy: false })}
                   className={`px-2 py-1 text-xs transition-all ${
                     !event.busy
-                      ? 'bg-nord14/20 text-nord14 border border-green-500/30'
+                      ? 'bg-nord14/20 text-nord14 border border-nord14/30'
                       : 'text-nord3 border border-nord3 hover:bg-nord2'
                   }`}
                 >

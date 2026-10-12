@@ -555,7 +555,7 @@ function AllDayRow({
                 className="text-[10px] px-1.5 py-0.5 truncate cursor-pointer hover:opacity-80 transition-opacity mb-0.5 font-mono"
                 style={{
                   backgroundColor: event.color + '25',
-                  color: event.color,
+                  color: 'rgb(var(--nord6))',
                   borderLeft: `2px solid ${event.color}`,
                 }}
               >
@@ -629,7 +629,7 @@ function EventBlock({
       onClick={onOpen}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(e)}
     >
-      <div className="text-[10px] font-bold truncate" style={{ color: event.color }}>
+      <div className="text-[10px] font-bold truncate text-nord6">
         {event.title}
       </div>
       {geometry.height > 28 && (

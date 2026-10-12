@@ -537,7 +537,7 @@ function buildAvailableSlots(
   const defaultProfile: SchedulingHoursProfile = {
     id: '_default',
     name: 'Default',
-    color: '#88C0D0',
+    color: '#89b4fa',
     weeklySchedule: Object.fromEntries(
       Array.from({ length: 7 }, (_, day) => [
         day,

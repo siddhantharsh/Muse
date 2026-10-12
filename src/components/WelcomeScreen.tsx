@@ -9,6 +9,8 @@ import React, { useState } from 'react';
 import { ArrowLeft, Cloud, HardDrive, Mail } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
 import { AuthForm, type AuthMode } from './AuthForm';
+import { ThemeToggle } from './ThemeToggle';
+import { CatLogo } from './CatLogo';
 
 export function WelcomeScreen() {
   const setOnboardingChoice = useMuseStore((s) => s.setOnboardingChoice);
@@ -27,9 +29,10 @@ export function WelcomeScreen() {
     <div className="h-full overflow-y-auto scrollable bg-nord0 font-mono">
       <div className="min-h-full flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-[420px]">
-          <div className="flex items-center gap-2 mb-8">
-            <img src={`${import.meta.env.BASE_URL}icon.png`} alt="" className="w-7 h-7 object-contain" />
-            <span className="text-sm font-bold tracking-widest uppercase text-nord8">muse</span>
+          <div className="flex items-end gap-3 mb-8">
+            <CatLogo className="text-[11px]" />
+            <span className="text-sm font-bold tracking-widest uppercase text-nord8 pb-1">muse</span>
+            <ThemeToggle className="ml-auto" />
           </div>
 
           {step === 'choose' ? (

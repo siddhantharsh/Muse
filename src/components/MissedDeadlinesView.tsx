@@ -57,7 +57,7 @@ export function MissedDeadlinesView() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-nord3">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8  bg-red-500/15 flex items-center justify-center">
+          <div className="w-8 h-8  bg-nord11/15 flex items-center justify-center">
             <AlertTriangle size={18} className="text-nord11" />
           </div>
           <div>
@@ -106,7 +106,7 @@ export function MissedDeadlinesView() {
       <div className="flex-1 overflow-y-auto scrollable px-6 py-4">
         {sortedOverdue.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16  bg-nord14/10 border border-green-500/20 flex items-center justify-center mb-4">
+            <div className="w-16 h-16  bg-nord14/10 border border-nord14/20 flex items-center justify-center mb-4">
               <Check size={28} className="text-nord14" />
             </div>
             <h3 className="text-sm font-medium text-nord4 mb-1">
@@ -129,8 +129,8 @@ export function MissedDeadlinesView() {
                   key={task.id}
                   className={`flex items-center gap-3 px-4 py-3  border cursor-pointer group transition-all ${
                     ui.multiSelectIds.includes(task.id)
-                      ? 'bg-nord11/10 border-red-500/30'
-                      : 'bg-nord1 border-red-500/20 hover:border-red-500/40'
+                      ? 'bg-nord11/10 border-nord11/30'
+                      : 'bg-nord1 border-nord11/20 hover:border-nord11/40'
                   }`}
                   onClick={(e) => {
                     if (ui.multiSelectMode) {
@@ -160,7 +160,7 @@ export function MissedDeadlinesView() {
                         completeTask(task.id);
                       }}
                       aria-label={`Mark “${task.title || 'Untitled'}” as done`}
-                      className="w-5 h-5  border-2 border-red-500/50 hover:border-red-400 flex-shrink-0 transition-colors"
+                      className="w-5 h-5  border-2 border-nord11/50 hover:border-nord11 flex-shrink-0 transition-colors"
                     />
                   )}
 

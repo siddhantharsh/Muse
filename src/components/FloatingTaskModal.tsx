@@ -37,6 +37,7 @@ import { wouldCreateCycle } from '../engine/dependencies';
 import { isRepeatingTemplate } from '../utils/taskSelectors';
 import { getRootScale, rootViewport } from '../utils/viewport';
 import { NumberField } from './NumberField';
+import { useFitInViewport, centredOpeningPosition } from '../hooks/useFitInViewport';
 
 const MODAL_WIDTH = 380;
 
@@ -53,6 +54,7 @@ export function FloatingTaskModal() {
     uncompleteTask,
     updateTaskProgress,
     openFloatingModal,
+    commitDraftTask,
   } = useMuseStore();
 
   const modal = ui.floatingModal;
@@ -67,6 +69,7 @@ export function FloatingTaskModal() {
   // modal.x/y are screen pixels (from mouse events); this window lives inside
   // the zoomed #root, so convert once and keep it on screen.
   const [position, setPosition] = useState(() => {
+    if (modal?.draft) return centredOpeningPosition(MODAL_WIDTH);
     const scale = getRootScale();
     const vp = rootViewport(scale);
     return {
@@ -85,6 +88,8 @@ export function FloatingTaskModal() {
   const [showDepsDropdown, setShowDepsDropdown] = useState(false);
   const [showRepeatDropdown, setShowRepeatDropdown] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
+  const isDraft = !!modal?.draft;
+  useFitInViewport(modalRef, setPosition, !!task);
 
   // Dragging logic — pointer coordinates are converted into #root CSS pixels
   const handleMouseDown = useCallback(
@@ -137,15 +142,15 @@ export function FloatingTaskModal() {
   const maxModalHeight = Math.round(rootViewport().height * 0.8);
   const urgencyBorder =
     task.urgencyColor === UrgencyColor.Red
-      ? 'border-red-500/30'
+      ? 'border-nord11/30'
       : task.urgencyColor === UrgencyColor.Orange
-      ? 'border-orange-500/30'
+      ? 'border-nord12/30'
       : 'border-nord3';
 
   const priorityLabels: Record<Priority, { label: string; color: string; icon: string }> = {
     [Priority.High]: { label: 'High', color: 'text-nord11', icon: '🔴' },
-    [Priority.Medium]: { label: 'Medium', color: 'text-yellow-400', icon: '🟡' },
-    [Priority.Low]: { label: 'Low', color: 'text-blue-400', icon: '🔵' },
+    [Priority.Medium]: { label: 'Medium', color: 'text-nord13', icon: '🟡' },
+    [Priority.Low]: { label: 'Low', color: 'text-nord10', icon: '🔵' },
     [Priority.None]: { label: 'None', color: 'text-nord3', icon: '⚪' },
   };
 
@@ -169,7 +174,7 @@ export function FloatingTaskModal() {
         <div className="flex items-center gap-2">
           <GripHorizontal size={14} className="text-nord3" />
           <span className="text-[10px] uppercase tracking-wider text-nord3 font-medium">
-            {isTemplate ? 'Repeating series' : 'Task Detail'}
+            {isDraft ? 'New task' : isTemplate ? 'Repeating series' : 'Task Detail'}
           </span>
           {task.urgencyColor === UrgencyColor.Red && !task.schedulingBlocked && (
             <span className="text-[10px] bg-nord11/20 text-nord11 px-1.5 py-0.5  font-semibold">
@@ -177,7 +182,7 @@ export function FloatingTaskModal() {
             </span>
           )}
           {task.urgencyColor === UrgencyColor.Orange && (
-            <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5  font-semibold">
+            <span className="text-[10px] bg-nord12/20 text-nord12 px-1.5 py-0.5  font-semibold">
               DUE SOON
             </span>
           )}
@@ -292,7 +297,7 @@ export function FloatingTaskModal() {
             >
               <div
                 className="w-2.5 h-2.5 "
-                style={{ backgroundColor: list?.color || '#88C0D0' }}
+                style={{ backgroundColor: list?.color || '#89b4fa' }}
               />
               <span className="text-xs text-nord4">{list?.name || 'No List'}</span>
               <ChevronDown size={10} className="text-nord3" />
@@ -351,7 +356,7 @@ export function FloatingTaskModal() {
               {task.dueDate && (
                 <button
                   onClick={() => updateTask(task.id, { dueDate: null })}
-                  className="text-[10px] text-nord11 hover:text-red-300"
+                  className="text-[10px] text-nord11 hover:text-nord11"
                 >
                   Remove
                 </button>
@@ -372,7 +377,7 @@ export function FloatingTaskModal() {
               {task.startAfter && (
                 <button
                   onClick={() => updateTask(task.id, { startAfter: null })}
-                  className="text-[10px] text-nord11 hover:text-red-300"
+                  className="text-[10px] text-nord11 hover:text-nord11"
                 >
                   Remove
                 </button>
@@ -536,7 +541,7 @@ export function FloatingTaskModal() {
                             dependsOn: task.dependsOn.filter((d) => d !== depId),
                           })
                         }
-                        className="text-nord11 hover:text-red-300"
+                        className="text-nord11 hover:text-nord11"
                       >
                         <X size={10} />
                       </button>
@@ -669,6 +674,23 @@ export function FloatingTaskModal() {
       </div>
 
       {/* Footer Actions */}
+      {isDraft ? (
+        <div className="flex items-center justify-between gap-2 px-4 py-2 border-t border-nord3/50">
+          <span className="text-[10px] text-nord3">Set it up, then add it</span>
+          <div className="flex items-center gap-1">
+            <button onClick={closeFloatingModal} className="btn-ghost text-xs">
+              Cancel
+            </button>
+            <button
+              onClick={commitDraftTask}
+              className="btn-primary text-xs flex items-center gap-1"
+            >
+              <CalendarDays size={12} />
+              Add to calendar
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="flex items-center justify-end px-4 py-2 border-t border-nord3/50">
         <div className="flex items-center gap-1">
           <button
@@ -683,6 +705,7 @@ export function FloatingTaskModal() {
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }

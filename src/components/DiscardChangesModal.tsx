@@ -16,7 +16,7 @@ export function DiscardChangesModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={onCancel} />
+      <div className="absolute inset-0 bg-nord0/70" onClick={onCancel} />
 
       {/* Modal */}
       <div className="relative bg-nord1 border border-nord3 w-[340px] p-0 animate-scale-in">

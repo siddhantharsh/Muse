@@ -5,6 +5,8 @@
 import React from 'react';
 import { Menu, Smartphone } from 'lucide-react';
 import { useMuseStore } from '../store/useMuseStore';
+import { ThemeToggle } from './ThemeToggle';
+import { CatLogo } from './CatLogo';
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState(
@@ -25,7 +27,7 @@ export function PhoneHeader() {
   const isMobile = useIsMobile();
 
   return (
-    <div className="h-10 flex items-center justify-between px-3 bg-nord0 border-b border-nord3 select-none font-mono">
+    <div className="h-12 flex items-center justify-between px-3 bg-nord0 border-b border-nord3 select-none font-mono">
       <div className="flex items-center gap-2">
         {isMobile && (
           <button
@@ -36,12 +38,11 @@ export function PhoneHeader() {
             <Menu size={16} />
           </button>
         )}
-        <span className="text-xs font-bold text-nord8 tracking-widest uppercase">
-          muse
-        </span>
-        <span className="text-xs text-nord3">│</span>
-        <span className="text-[10px] text-nord4">
-          {isMobile ? 'mobile' : 'web'}
+        <CatLogo variant="mini" className="text-[10px] !leading-none" />
+        <span className="flex items-baseline gap-2">
+          <span className="text-xs font-bold text-nord8 tracking-widest uppercase">muse</span>
+          <span className="text-xs text-nord3">│</span>
+          <span className="text-[10px] text-nord4">{isMobile ? 'mobile' : 'web'}</span>
         </span>
         {isMobile && (
           <a
@@ -56,6 +57,7 @@ export function PhoneHeader() {
           </a>
         )}
       </div>
+      <ThemeToggle />
     </div>
   );
 }

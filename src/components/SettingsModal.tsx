@@ -274,7 +274,7 @@ function SchedulingSettings({ settings, updateSettings }: any) {
             className={`w-full flex items-start gap-3 p-3  border transition-all ${
               settings.distributionModel === DistributionModel.Balanced
                 ? 'border-nord8 bg-nord8/10'
-                : 'border-nord3 hover:border-nord3Light'
+                : 'border-nord3 hover:border-nord9'
             }`}
           >
             <div className="mt-0.5">
@@ -301,7 +301,7 @@ function SchedulingSettings({ settings, updateSettings }: any) {
             className={`w-full flex items-start gap-3 p-3  border transition-all ${
               settings.distributionModel === DistributionModel.FrontLoad
                 ? 'border-nord8 bg-nord8/10'
-                : 'border-nord3 hover:border-nord3Light'
+                : 'border-nord3 hover:border-nord9'
             }`}
           >
             <div className="mt-0.5">
@@ -726,7 +726,7 @@ function AppearanceSettings({ settings, updateSettings }: any) {
             className={`flex items-center gap-2 px-3 py-2  border transition-all ${
               settings.theme === 'dark'
                 ? 'border-nord8 bg-nord8/10'
-                : 'border-nord3 hover:border-nord3Light'
+                : 'border-nord3 hover:border-nord9'
             }`}
           >
             <Moon size={14} />
@@ -737,7 +737,7 @@ function AppearanceSettings({ settings, updateSettings }: any) {
             className={`flex items-center gap-2 px-3 py-2  border transition-all ${
               settings.theme === 'light'
                 ? 'border-nord8 bg-nord8/10'
-                : 'border-nord3 hover:border-nord3Light'
+                : 'border-nord3 hover:border-nord9'
             }`}
           >
             <Sun size={14} />

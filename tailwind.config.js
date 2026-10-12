@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Nord theme-aware colors (RGB channel vars for opacity support)
+        // Theme-aware palette slots (RGB channel vars for opacity support)
         nord0: 'rgb(var(--nord0) / <alpha-value>)',
         nord1: 'rgb(var(--nord1) / <alpha-value>)',
         nord2: 'rgb(var(--nord2) / <alpha-value>)',
@@ -12,17 +12,16 @@ export default {
         nord4: 'rgb(var(--nord4) / <alpha-value>)',
         nord5: 'rgb(var(--nord5) / <alpha-value>)',
         nord6: 'rgb(var(--nord6) / <alpha-value>)',
-        // Nord Frost (static — same in both themes)
-        nord7: '#8FBCBB',
-        nord8: '#88C0D0',
-        nord9: '#81A1C1',
-        nord10: '#5E81AC',
-        // Nord Aurora (static)
-        nord11: '#BF616A',
-        nord12: '#D08770',
-        nord13: '#EBCB8B',
-        nord14: '#A3BE8C',
-        nord15: '#B48EAD',
+        // Accents and status colours (theme-aware too)
+        nord7: 'rgb(var(--nord7) / <alpha-value>)',
+        nord8: 'rgb(var(--nord8) / <alpha-value>)',
+        nord9: 'rgb(var(--nord9) / <alpha-value>)',
+        nord10: 'rgb(var(--nord10) / <alpha-value>)',
+        nord11: 'rgb(var(--nord11) / <alpha-value>)',
+        nord12: 'rgb(var(--nord12) / <alpha-value>)',
+        nord13: 'rgb(var(--nord13) / <alpha-value>)',
+        nord14: 'rgb(var(--nord14) / <alpha-value>)',
+        nord15: 'rgb(var(--nord15) / <alpha-value>)',
         // Semantic mapping (theme-aware via CSS vars)
         muse: {
           bg: 'var(--muse-bg)',
@@ -30,22 +29,22 @@ export default {
           surfaceHover: 'var(--muse-surface-hover)',
           border: 'var(--muse-border)',
           borderLight: 'var(--muse-border-light)',
-          primary: '#88C0D0',
-          primaryHover: '#8FBCBB',
-          primaryMuted: '#5E81AC',
-          accent: '#81A1C1',
+          primary: 'rgb(var(--nord8))',
+          primaryHover: 'rgb(var(--nord7))',
+          primaryMuted: 'rgb(var(--nord10))',
+          accent: 'rgb(var(--nord9))',
           text: 'var(--muse-text)',
           textSecondary: 'var(--muse-text-secondary)',
           textMuted: 'var(--muse-text-muted)',
-          green: '#A3BE8C',
+          green: 'rgb(var(--nord14))',
           greenBg: 'var(--muse-surface)',
-          orange: '#D08770',
+          orange: 'rgb(var(--nord12))',
           orangeBg: 'var(--muse-surface)',
-          red: '#BF616A',
+          red: 'rgb(var(--nord11))',
           redBg: 'var(--muse-surface)',
-          blue: '#5E81AC',
-          yellow: '#EBCB8B',
-          purple: '#B48EAD',
+          blue: 'rgb(var(--nord10))',
+          yellow: 'rgb(var(--nord13))',
+          purple: 'rgb(var(--nord15))',
         },
       },
       fontFamily: {

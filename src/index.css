@@ -3,100 +3,132 @@
 @tailwind utilities;
 
 /* ============================================================
-   Muse — Nord Terminal GUI Theme (Dark + Light)
+   Muse — Catppuccin Theme (Mocha + Latte)
    ============================================================ */
 
 /* ---- Theme CSS Variables ---- */
 
+/* Catppuccin — Mocha (dark) and Latte (light). Token names keep the
+   original nord0–nord15 slots so every component re-themes from here:
+   0 base · 1 mantle · 2 surface0 · 3 surface1 · 4–6 text,
+   7 lavender (hover) · 8 mauve (primary) · 9 lavender · 10 blue,
+   11 red · 12 peach · 13 yellow · 14 green · 15 pink.
+   Latte accents used as text are deepened slightly so they stay readable. */
 :root {
-  /* Nord Polar Night ↔ Snow Storm mapping (RGB channels for Tailwind opacity) */
-  --nord0: 46 52 64;
-  --nord1: 59 66 82;
-  --nord2: 67 76 94;
-  --nord3: 76 86 106;
-  --nord4: 216 222 233;
-  --nord5: 229 233 240;
-  --nord6: 236 239 244;
+  --nord0: 30 30 46;
+  --nord1: 24 24 37;
+  --nord2: 49 50 68;
+  --nord3: 69 71 90;
+  --nord4: 186 194 222;
+  --nord5: 186 194 222;
+  --nord6: 205 214 244;
+  --nord7: 180 190 254;
+  --nord8: 203 166 247;
+  --nord9: 180 190 254;
+  --nord10: 137 180 250;
+  --nord11: 243 139 168;
+  --nord12: 250 179 135;
+  --nord13: 249 226 175;
+  --nord14: 166 227 161;
+  --nord15: 245 194 231;
 
   /* Semantic mapping */
-  --muse-bg: #2E3440;
-  --muse-surface: #3B4252;
-  --muse-surface-hover: #434C5E;
-  --muse-border: #4C566A;
-  --muse-border-light: #5a657a;
-  --muse-text: #ECEFF4;
-  --muse-text-secondary: #D8DEE9;
-  --muse-text-muted: #4C566A;
+  --muse-bg: #1e1e2e;
+  --muse-surface: #181825;
+  --muse-surface-hover: #313244;
+  --muse-border: #45475a;
+  --muse-border-light: #585b70;
+  --muse-text: #cdd6f4;
+  --muse-text-secondary: #bac2de;
+  --muse-text-muted: #7f849c;
 
   /* Scrollbar */
-  --scrollbar-thumb: #4C566A;
-  --scrollbar-track: #2E3440;
+  --scrollbar-thumb: #45475a;
+  --scrollbar-track: #181825;
 
   /* Selection */
-  --selection-bg: rgba(136, 192, 208, 0.3);
-  --selection-color: #ECEFF4;
+  --selection-bg: rgba(203, 166, 247, 0.3);
+  --selection-color: #cdd6f4;
 
   /* Shadows & overlays */
-  --shadow-color: #2E3440;
-  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --shadow-color: #11111b;
+  --overlay-bg: rgba(17, 17, 27, 0.6);
 
   /* Button primary text */
-  --btn-primary-text: #2E3440;
+  --btn-primary-text: #1e1e2e;
 
-  /* Secondary text — readable on every surface (≥ 5:1 on nord1) */
-  --muse-text-dim: #AEB7C7;
+  /* Secondary text — readable on every surface (≥ 5.6:1 on surface0) */
+  --muse-text-dim: #a6adc8;
+
+  /* Calendar structure */
+  --grid-line: rgba(147, 153, 178, 0.08);
+  --grid-line-hour: rgba(147, 153, 178, 0.16);
 }
 
 [data-theme="light"] {
-  /* Swap Polar Night ↔ Snow Storm (RGB channels for Tailwind opacity) */
-  --nord0: 236 239 244;
-  --nord1: 229 233 240;
-  --nord2: 216 222 233;
-  --nord3: 200 206 217;
-  --nord4: 76 86 106;
-  --nord5: 59 66 82;
-  --nord6: 46 52 64;
+  --nord0: 239 241 245;
+  --nord1: 230 233 239;
+  --nord2: 204 208 218;
+  --nord3: 188 192 204;
+  --nord4: 92 95 119;
+  --nord5: 92 95 119;
+  --nord6: 76 79 105;
+  --nord7: 114 135 253;
+  --nord8: 136 57 239;
+  --nord9: 84 104 224;
+  --nord10: 30 102 245;
+  --nord11: 193 14 53;
+  --nord12: 184 74 6;
+  --nord13: 154 98 7;
+  --nord14: 44 122 31;
+  --nord15: 183 69 143;
 
   /* Semantic mapping — light */
-  --muse-bg: #ECEFF4;
-  --muse-surface: #E5E9F0;
-  --muse-surface-hover: #D8DEE9;
-  --muse-border: #C8CED9;
-  --muse-border-light: #B8BFC9;
-  --muse-text: #2E3440;
-  --muse-text-secondary: #3B4252;
-  --muse-text-muted: #7B88A0;
+  --muse-bg: #eff1f5;
+  --muse-surface: #e6e9ef;
+  --muse-surface-hover: #ccd0da;
+  --muse-border: #bcc0cc;
+  --muse-border-light: #acb0be;
+  --muse-text: #4c4f69;
+  --muse-text-secondary: #5c5f77;
+  --muse-text-muted: #8c8fa1;
 
   /* Scrollbar */
-  --scrollbar-thumb: #B8BFC9;
-  --scrollbar-track: #E5E9F0;
+  --scrollbar-thumb: #bcc0cc;
+  --scrollbar-track: #e6e9ef;
 
   /* Selection */
-  --selection-bg: rgba(94, 129, 172, 0.3);
-  --selection-color: #2E3440;
+  --selection-bg: rgba(136, 57, 239, 0.2);
+  --selection-color: #4c4f69;
 
   /* Shadows */
-  --shadow-color: #C8CED9;
-  --overlay-bg: rgba(0, 0, 0, 0.2);
+  --shadow-color: #dce0e8;
+  --overlay-bg: rgba(76, 79, 105, 0.25);
 
   /* Button primary text */
-  --btn-primary-text: #ECEFF4;
+  --btn-primary-text: #eff1f5;
 
-  /* Secondary text — readable on every surface (≥ 4.5:1 on nord1) */
-  --muse-text-dim: #5C667A;
+  /* Secondary text — readable on every surface (≥ 4.5:1 on mantle) */
+  --muse-text-dim: #5f6278;
+
+  /* Calendar structure */
+  --grid-line: rgba(76, 79, 105, 0.07);
+  --grid-line-hour: rgba(76, 79, 105, 0.13);
 }
 
-/* nord3 (#4C566A) is Nord's border/comment color. Used as text it sits at
-   ~1.6:1 on nord1 — unreadable — so wherever it's applied to text, lift it
-   to the readable secondary tone. Borders keep the original nord3. */
-.text-nord3 {
+/* nord3 is the border tone. Used as text it is unreadable on surfaces, so
+   wherever it's applied to text, lift it to the readable secondary tone.
+   Borders keep the original nord3. */
+:root .text-nord3 {
   color: var(--muse-text-dim);
 }
-.placeholder\:text-nord3::placeholder {
+:root .placeholder\:text-nord3::placeholder,
+:root input::placeholder,
+:root textarea::placeholder {
   color: var(--muse-text-dim);
-  opacity: 0.75;
+  opacity: 0.8;
 }
-.hover\:text-nord3:hover {
+:root .hover\:text-nord3:hover {
   color: var(--muse-text-dim);
 }
 
@@ -124,7 +156,7 @@ html, body, #root {
 
 /* Focus outlines — squared, frost */
 :focus-visible {
-  outline: 1px solid #88C0D0;
+  outline: 1px solid rgb(var(--nord8));
   outline-offset: 0px;
 }
 
@@ -135,11 +167,11 @@ html, body, #root {
 
 /* Calendar grid lines — barely visible structure */
 .grid-line {
-  border-top: 1px solid rgba(76, 86, 106, 0.05);
+  border-top: 1px solid var(--grid-line);
 }
 
 .grid-line-hour {
-  border-top: 1px solid rgba(76, 86, 106, 0.1);
+  border-top: 1px solid var(--grid-line-hour);
 }
 
 /* Scrollable areas */
@@ -186,31 +218,31 @@ html, body, #root {
     -45deg,
     transparent,
     transparent 4px,
-    rgba(76, 86, 106, 0.15) 4px,
-    rgba(76, 86, 106, 0.15) 8px
+    rgb(var(--nord9) / 0.15) 4px,
+    rgb(var(--nord9) / 0.15) 8px
   );
 }
 
 /* Task urgency color classes — Nord Aurora colors */
 .urgency-green {
-  border-left: 3px solid #A3BE8C;
-  background: rgba(163, 190, 140, 0.15);
+  border-left: 3px solid rgb(var(--nord14));
+  background: rgb(var(--nord14) / 0.15);
 }
 
 .urgency-orange {
-  border-left: 3px solid #D08770;
-  background: rgba(208, 135, 112, 0.15);
+  border-left: 3px solid rgb(var(--nord12));
+  background: rgb(var(--nord12) / 0.15);
 }
 
 .urgency-red {
-  border-left: 3px solid #BF616A;
-  background: rgba(191, 97, 106, 0.15);
+  border-left: 3px solid rgb(var(--nord11));
+  background: rgb(var(--nord11) / 0.15);
   animation: pulse-red 2s ease-in-out infinite;
 }
 
 @keyframes pulse-red {
-  0%, 100% { background: rgba(191, 97, 106, 0.15); }
-  50% { background: rgba(191, 97, 106, 0.25); }
+  0%, 100% { background: rgb(var(--nord11) / 0.15); }
+  50% { background: rgb(var(--nord11) / 0.25); }
 }
 
 /* Now indicator line — nord red */
@@ -219,10 +251,10 @@ html, body, #root {
   left: 0;
   right: 0;
   height: 2px;
-  background: #BF616A;
+  background: rgb(var(--nord11));
   z-index: 20;
   pointer-events: none;
-  box-shadow: 0 0 4px 1px rgba(191, 97, 106, 0.5);
+  box-shadow: 0 0 4px 1px rgb(var(--nord11) / 0.5);
 }
 
 .now-line::before {
@@ -232,14 +264,14 @@ html, body, #root {
   top: -4px;
   width: 10px;
   height: 10px;
-  background: #BF616A;
+  background: rgb(var(--nord11));
   border-radius: 50%;
-  box-shadow: 0 0 6px 2px rgba(191, 97, 106, 0.4);
+  box-shadow: 0 0 6px 2px rgb(var(--nord11) / 0.4);
 }
 
 /* Progress bar — frost gradient */
 .progress-bar {
-  background: linear-gradient(90deg, #5E81AC, #88C0D0);
+  background: linear-gradient(90deg, rgb(var(--nord10)), rgb(var(--nord8)));
   transition: width 0.3s ease;
 }
 
@@ -281,15 +313,15 @@ html, body, #root {
 .btn-primary {
   @apply btn-base;
   color: var(--btn-primary-text);
-  background: #88C0D0;
-  border-color: #88C0D0;
+  background: rgb(var(--nord8));
+  border-color: rgb(var(--nord8));
 }
 .btn-primary:hover {
-  background: #8FBCBB;
-  border-color: #8FBCBB;
+  background: rgb(var(--nord7));
+  border-color: rgb(var(--nord7));
 }
 .btn-primary:active {
-  background: #5E81AC;
+  background: rgb(var(--nord10));
 }
 
 .btn-secondary {
@@ -305,12 +337,12 @@ html, body, #root {
 
 .btn-danger {
   @apply btn-base;
-  background: rgba(191, 97, 106, 0.15);
-  color: #BF616A;
-  border-color: rgba(191, 97, 106, 0.3);
+  background: rgb(var(--nord11) / 0.15);
+  color: rgb(var(--nord11));
+  border-color: rgb(var(--nord11) / 0.3);
 }
 .btn-danger:hover {
-  background: rgba(191, 97, 106, 0.25);
+  background: rgb(var(--nord11) / 0.25);
 }
 
 .btn-ghost {
@@ -337,7 +369,7 @@ html, body, #root {
 }
 .input-base:focus {
   outline: none;
-  border-color: #88C0D0;
+  border-color: rgb(var(--nord8));
 }
 
 /* Checkbox — terminal checkbox */
@@ -351,8 +383,8 @@ html, body, #root {
 }
 
 .checkbox:checked {
-  background: #88C0D0;
-  border-color: #88C0D0;
+  background: rgb(var(--nord8));
+  border-color: rgb(var(--nord8));
 }
 
 .checkbox:checked::after {
@@ -374,7 +406,7 @@ html, body, #root {
 }
 
 .toggle.active {
-  background: #88C0D0;
+  background: rgb(var(--nord8));
 }
 
 .toggle::after {
@@ -391,7 +423,7 @@ html, body, #root {
 .cursor-blink::after {
   content: '█';
   animation: blink 1s step-end infinite;
-  color: #88C0D0;
+  color: rgb(var(--nord8));
 }
 
 @keyframes blink {
@@ -421,7 +453,7 @@ html, body, #root {
     position: fixed;
     inset: 0;
     z-index: 40;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--overlay-bg);
   }
 
   /* Floating modals go full width */

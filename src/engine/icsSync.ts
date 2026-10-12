@@ -130,7 +130,7 @@ function icsEntryToEvent(entry: IcsEntry): Partial<CalendarEvent> | null {
     endTime: toLocalISO(endDate),
     allDay,
     busy: !allDay && !transparent,
-    color: '#5E81AC',
+    color: '#cba6f7',
     notes: '',
     repeatingRule: parseRRule(first(entry, 'RRULE')?.value, entry['EXDATE'] ?? []),
     bufferBefore: 0,

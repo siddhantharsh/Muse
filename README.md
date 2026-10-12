@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Muse_logo.png" alt="Muse Logo" width="180" />
+  <img src="Muse_logo.gif" alt="Muse — an ASCII cat dancing under a spinning m" width="260" />
 </p>
 
 <h1 align="center">Muse</h1>

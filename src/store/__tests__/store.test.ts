@@ -187,3 +187,48 @@ describe('events', () => {
     expect(store().events[0].title).toBe('Daily standup');
   });
 });
+
+describe('quick-add draft', () => {
+  const openDraft = () => {
+    const t = store().addTask({ title: 'Write report', inInbox: true, autoSchedule: true });
+    store().openFloatingModal({ type: 'task', id: t.id, x: 0, y: 0, draft: true });
+    return t.id;
+  };
+
+  it('holds the task out of the calendar until confirmed', () => {
+    const id = openDraft();
+    expect(task(id)?.inInbox).toBe(true);
+    store().commitDraftTask();
+    expect(task(id)?.inInbox).toBe(false);
+    expect(task(id)?.autoSchedule).toBe(true);
+    expect(store().ui.floatingModal).toBeNull();
+  });
+
+  it('discards the task when the window is closed without confirming', () => {
+    const id = openDraft();
+    store().closeFloatingModal();
+    expect(task(id)).toBeUndefined();
+    expect(store().ui.floatingModal).toBeNull();
+  });
+
+  it('closing a normal task window keeps the task', () => {
+    const t = store().addTask({ title: 'Existing' });
+    store().openFloatingModal({ type: 'task', id: t.id, x: 0, y: 0 });
+    store().closeFloatingModal();
+    expect(task(t.id)).toBeDefined();
+  });
+});
+
+describe('legacy colours', () => {
+  it('maps old Nord colours to the new palette when synced data arrives', () => {
+    const payload = store().getSyncPayload();
+    store().applySyncPayload({
+      ...payload,
+      tasks: [makeTask({ id: 'old', color: '#88C0D0' }), makeTask({ id: 'custom', color: '#123456' })],
+      events: [makeEvent({ id: 'ev', color: '#5e81ac', startTime: fromNow(1, 10), endTime: fromNow(1, 11) })],
+    });
+    expect(task('old')?.color).toBe('#89b4fa');
+    expect(task('custom')?.color).toBe('#123456');
+    expect(store().events.find((e) => e.id === 'ev')?.color).toBe('#74c7ec');
+  });
+});

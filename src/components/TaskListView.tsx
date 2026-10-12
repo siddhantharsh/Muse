@@ -471,7 +471,7 @@ function TaskRow({
                 task.urgencyColor === UrgencyColor.Red
                   ? 'text-nord11'
                   : task.urgencyColor === UrgencyColor.Orange
-                  ? 'text-orange-400'
+                  ? 'text-nord12'
                   : 'text-nord3'
               }`}
             >

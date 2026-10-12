@@ -240,8 +240,8 @@ function InboxTaskRow({
 }) {
   const priorityColors: Record<Priority, string> = {
     [Priority.High]: 'text-nord11',
-    [Priority.Medium]: 'text-yellow-400',
-    [Priority.Low]: 'text-blue-400',
+    [Priority.Medium]: 'text-nord13',
+    [Priority.Low]: 'text-nord10',
     [Priority.None]: 'text-nord3',
   };
 

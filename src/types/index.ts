@@ -211,6 +211,9 @@ export interface FloatingModal {
   id: string;
   x: number;
   y: number;
+  // A task typed into quick-add: held out of the calendar until confirmed,
+  // discarded if the window is closed without confirming.
+  draft?: boolean;
 }
 
 export interface UIState {

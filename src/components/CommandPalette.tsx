@@ -249,7 +249,7 @@ export function CommandPalette() {
       onClick={() => setCommandPaletteOpen(false)}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-nord0/70 backdrop-blur-sm" />
 
       {/* Palette */}
       <div

@@ -6,22 +6,26 @@
     <title>Page not found — Muse</title>
     <meta name="robots" content="noindex" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <script>
+      try { if (JSON.parse(localStorage.getItem('muse_settings') || '{}').theme === 'light') document.documentElement.setAttribute('data-theme', 'light'); } catch (e) {}
+    </script>
     <style>
-      :root { color-scheme: dark; }
+      :root { color-scheme: dark; --bg: #1e1e2e; --text: #cdd6f4; --text-2: #bac2de; --accent: #cba6f7; --line: #45475a; --primary: #cba6f7; --primary-ink: #1e1e2e; }
+      [data-theme="light"] { color-scheme: light; --bg: #eff1f5; --text: #4c4f69; --text-2: #5c5f77; --accent: #8839ef; --line: #bcc0cc; --primary: #8839ef; --primary-ink: #eff1f5; }
       html, body { height: 100%; margin: 0; }
       body {
         display: grid;
         place-items: center;
         padding: 24px;
         box-sizing: border-box;
-        background: #1c2028;
-        color: #eceff4;
+        background: var(--bg);
+        color: var(--text);
         font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
       }
       main { max-width: 440px; }
-      .code { color: #88c0d0; font-size: 14px; letter-spacing: 0.1em; }
+      .code { color: var(--accent); font: inherit; font-size: 14px; line-height: 1.15; margin: 0; }
       h1 { font-size: 28px; line-height: 1.2; margin: 12px 0; }
-      p { color: #c5ccd8; line-height: 1.6; margin: 0 0 28px; }
+      p { color: var(--text-2); line-height: 1.6; margin: 0 0 28px; }
       .links { display: flex; flex-wrap: wrap; gap: 12px; }
       a {
         padding: 11px 18px;
@@ -29,17 +33,18 @@
         font-size: 14px;
         font-weight: 600;
         text-decoration: none;
-        border: 1px solid #4c566a;
-        color: #eceff4;
+        border: 1px solid var(--line);
+        color: var(--text);
       }
-      a.primary { background: #88c0d0; border-color: #88c0d0; color: #1c2028; }
-      a:hover { border-color: #88c0d0; }
-      a:focus-visible { outline: 2px solid #88c0d0; outline-offset: 2px; }
+      a.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+      a:hover { border-color: var(--accent); }
+      a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     </style>
   </head>
   <body>
     <main>
-      <div class="code">$ muse open — 404</div>
+      <pre class="code">   Λ___Λ
+  (´•ω•`)?  $ muse open — 404</pre>
       <h1>This page isn’t on the schedule.</h1>
       <p>The link may be old or mistyped. Your tasks are fine — they live in the app.</p>
       <div class="links">

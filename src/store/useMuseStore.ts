@@ -40,7 +40,7 @@ import type { SyncPayload } from '../utils/cloudSync';
 const defaultSchedulingProfile: SchedulingHoursProfile = {
   id: 'default-profile',
   name: 'Work Hours',
-  color: '#88C0D0',
+  color: '#89b4fa',
   weeklySchedule: {
     0: { enabled: false, blocks: [] },
     1: { enabled: true, blocks: [{ start: '09:00', end: '17:00' }] },
@@ -117,7 +117,7 @@ const DEFAULT_LIST_ID = 'default-list';
 const createDefaultList = (): TaskList => ({
   id: DEFAULT_LIST_ID,
   name: 'Muse Calendar',
-  color: '#88C0D0',
+  color: '#89b4fa',
   icon: '📋',
   defaultSchedulingHoursId: 'default-profile',
   defaultCalendarId: null,
@@ -155,10 +155,38 @@ function sanitizeSettings(raw: Partial<AppSettings>): AppSettings {
     weekStartsOn: s.weekStartsOn === 0 ? 0 : 1,
     schedulingHoursProfiles:
       Array.isArray(s.schedulingHoursProfiles) && s.schedulingHoursProfiles.length > 0
-        ? s.schedulingHoursProfiles
+        ? s.schedulingHoursProfiles.map((p) => ({ ...p, color: migrateColor(p.color) as string }))
         : [defaultSchedulingProfile],
     tutorialCompleted: Boolean(s.tutorialCompleted),
   };
+}
+
+/** Colours saved under earlier palettes (Nord, then navy/beige), mapped to Catppuccin. */
+const LEGACY_COLORS: Record<string, string> = {
+  // Nord
+  '#88C0D0': '#89b4fa',
+  '#81A1C1': '#b4befe',
+  '#5E81AC': '#74c7ec',
+  '#8FBCBB': '#94e2d5',
+  '#A3BE8C': '#a6e3a1',
+  '#B48EAD': '#cba6f7',
+  '#D08770': '#fab387',
+  '#EBCB8B': '#f9e2af',
+  '#BF616A': '#f38ba8',
+  // Navy / beige
+  '#7288AE': '#89b4fa',
+  '#4B5694': '#b4befe',
+  '#5C7FC4': '#74c7ec',
+  '#3F8F8A': '#94e2d5',
+  '#6E9E6A': '#a6e3a1',
+  '#8A6FB8': '#cba6f7',
+  '#C5704F': '#fab387',
+  '#C9A35C': '#f9e2af',
+  '#B5536A': '#f38ba8',
+};
+
+function migrateColor(color: string | undefined): string | undefined {
+  return color ? LEGACY_COLORS[color.toUpperCase()] ?? color : color;
 }
 
 /** Repairs tasks from older versions / other devices (missing fields, UTC timestamps). */
@@ -166,6 +194,7 @@ function normalizeTask(t: Task): Task {
   const duration = clampInt(t.duration, 5, 100_000, 30);
   return {
     ...t,
+    color: migrateColor(t.color) as string,
     duration,
     progress: clampInt(t.progress, 0, duration, 0),
     minBlockDuration: clampInt(t.minBlockDuration, 5, 1440, 30),
@@ -194,6 +223,7 @@ function normalizeEvent(e: CalendarEvent): CalendarEvent {
   }
   return {
     ...e,
+    color: migrateColor(e.color) as string,
     startTime,
     endTime,
     bufferBefore: clampInt(e.bufferBefore, 0, 1440, 0),
@@ -204,7 +234,7 @@ function normalizeEvent(e: CalendarEvent): CalendarEvent {
 }
 
 function normalizeLists(lists: TaskList[]): TaskList[] {
-  const valid = Array.isArray(lists) ? lists : [];
+  const valid = (Array.isArray(lists) ? lists : []).map((l) => ({ ...l, color: migrateColor(l.color) as string }));
   return valid.some((l) => l.id === DEFAULT_LIST_ID) ? valid : [createDefaultList(), ...valid];
 }
 
@@ -463,6 +493,7 @@ interface MuseStore {
   setSidebarOpen: (open: boolean) => void;
   openFloatingModal: (modal: FloatingModal) => void;
   closeFloatingModal: () => void;
+  commitDraftTask: () => void;
   toggleSettings: () => void;
   toggleMultiSelect: () => void;
   toggleMultiSelectItem: (id: string) => void;
@@ -563,7 +594,7 @@ export const useMuseStore = create<MuseStore>((set, get) => {
         ),
         completed: false,
         completedAt: null,
-        color: taskInput.color || list?.color || '#88C0D0',
+        color: taskInput.color || list?.color || '#89b4fa',
         dependsOn: taskInput.dependsOn || [],
         repeatingRule: taskInput.repeatingRule || null,
         autoIgnore: taskInput.autoIgnore ?? false,
@@ -757,7 +788,7 @@ export const useMuseStore = create<MuseStore>((set, get) => {
         endTime: eventInput.endTime || toLocalISO(addMinutes(parseISO(start), 60)),
         allDay: eventInput.allDay ?? false,
         busy: eventInput.busy ?? !eventInput.allDay,
-        color: eventInput.color || '#5E81AC',
+        color: eventInput.color || '#cba6f7',
         location: eventInput.location || '',
         notes: eventInput.notes || '',
         repeatingRule: eventInput.repeatingRule || null,
@@ -820,7 +851,7 @@ export const useMuseStore = create<MuseStore>((set, get) => {
       const newList: TaskList = {
         id: uuidv4(),
         name: listInput.name || 'New List',
-        color: listInput.color || '#88C0D0',
+        color: listInput.color || '#89b4fa',
         icon: listInput.icon || '📁',
         defaultSchedulingHoursId: listInput.defaultSchedulingHoursId || 'default-profile',
         defaultCalendarId: listInput.defaultCalendarId || null,
@@ -881,7 +912,7 @@ export const useMuseStore = create<MuseStore>((set, get) => {
       const newProfile: SchedulingHoursProfile = {
         id: uuidv4(),
         name: profileInput.name || 'New Profile',
-        color: profileInput.color || '#B48EAD',
+        color: profileInput.color || '#f5c2e7',
         weeklySchedule: profileInput.weeklySchedule || {
           0: { enabled: false, blocks: [] },
           1: { enabled: true, blocks: [{ start: '09:00', end: '17:00' }] },
@@ -945,7 +976,18 @@ export const useMuseStore = create<MuseStore>((set, get) => {
       set((state) => ({ ui: { ...state.ui, sidebarOpen: !state.ui.sidebarOpen } })),
     setSidebarOpen: (open) => set((state) => ({ ui: { ...state.ui, sidebarOpen: open } })),
     openFloatingModal: (modal) => set((state) => ({ ui: { ...state.ui, floatingModal: modal } })),
-    closeFloatingModal: () => set((state) => ({ ui: { ...state.ui, floatingModal: null } })),
+    closeFloatingModal: () => {
+      const modal = get().ui.floatingModal;
+      // Closing a quick-add draft without confirming discards it.
+      if (modal?.draft) get().deleteTask(modal.id);
+      set((state) => ({ ui: { ...state.ui, floatingModal: null } }));
+    },
+    commitDraftTask: () => {
+      const modal = get().ui.floatingModal;
+      if (!modal?.draft) return;
+      set((state) => ({ ui: { ...state.ui, floatingModal: null } }));
+      get().updateTask(modal.id, { inInbox: false });
+    },
     toggleSettings: () =>
       set((state) => ({ ui: { ...state.ui, settingsOpen: !state.ui.settingsOpen } })),
     toggleMultiSelect: () =>
@@ -1051,7 +1093,7 @@ export const useMuseStore = create<MuseStore>((set, get) => {
             endTime: partial.endTime || nowISO(),
             allDay: partial.allDay ?? false,
             busy: partial.busy ?? true,
-            color: partial.color || '#5E81AC',
+            color: partial.color || '#cba6f7',
             location: partial.location || '',
             notes: partial.notes || '',
             repeatingRule: partial.repeatingRule || null,

@@ -70,9 +70,9 @@ const STEPS: TourStep[] = [
     title: 'Colors tell you if it fits',
     body: (
       <ul className="space-y-2">
-        <Swatch color="#A3BE8C" label="On track">scheduled with room to spare</Swatch>
-        <Swatch color="#D08770" label="Tight">fits, but with little slack before the deadline</Swatch>
-        <Swatch color="#BF616A" label="At risk">overdue, won’t fit, or blocked by another task</Swatch>
+        <Swatch color="rgb(var(--nord14))" label="On track">scheduled with room to spare</Swatch>
+        <Swatch color="rgb(var(--nord12))" label="Tight">fits, but with little slack before the deadline</Swatch>
+        <Swatch color="rgb(var(--nord11))" label="At risk">overdue, won’t fit, or blocked by another task</Swatch>
       </ul>
     ),
   },
@@ -248,13 +248,13 @@ export function Tutorial() {
             top: rect.top - PAD,
             width: rect.width + PAD * 2,
             height: rect.height + PAD * 2,
-            boxShadow: '0 0 0 9999px rgba(15, 18, 24, 0.72)',
-            outline: '2px solid #88C0D0',
+            boxShadow: '0 0 0 9999px rgba(17, 17, 27, 0.72)',
+            outline: '2px solid rgb(var(--nord8))',
             outlineOffset: 0,
           }}
         />
       ) : (
-        <div aria-hidden="true" className="absolute inset-0" style={{ background: 'rgba(15, 18, 24, 0.72)' }} />
+        <div aria-hidden="true" className="absolute inset-0" style={{ background: 'rgba(17, 17, 27, 0.72)' }} />
       )}
 
       <div
